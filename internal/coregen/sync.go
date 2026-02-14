@@ -1,0 +1,291 @@
+package coregen
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+var constructorPattern = regexp.MustCompile(`(?m)^func\s+(New[A-Za-z0-9_]+)\s*\(`)
+var fxDepsPattern = regexp.MustCompile(`(?s)type\s+[A-Za-z0-9_]+Deps\s+struct\s*\{[^}]*\bfx\.In\b`)
+var fxConstructorPattern = regexp.MustCompile(`(?m)^func\s+(New[A-Za-z0-9_]+)\s*\(\s*deps\s+[A-Za-z0-9_]+Deps\s*\)`)
+
+func SyncCore(projectRoot string) ([]string, error) {
+	contexts, err := listContexts(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	genDir := filepath.Join(projectRoot, "internal", "core", "_gen")
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	if err := os.WriteFile(filepath.Join(genDir, "contexts_gen.go"), []byte(renderContextsGen(contexts)), 0o644); err != nil {
+		return nil, err
+	}
+
+	modulePath := readModulePath(projectRoot)
+	if modulePath == "" {
+		return nil, fmt.Errorf("go.mod module path not found in %s", projectRoot)
+	}
+
+	for _, ctx := range contexts {
+		modulePath := filepath.Join(projectRoot, "internal", "core", "contexts", ctx, "module.go")
+		if !exists(modulePath) {
+			return nil, fmt.Errorf("context %s is missing module.go; run `vandor sync context %s` first", ctx, ctx)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(genDir, "modules_gen.go"), []byte(renderCoreModulesGen(modulePath, contexts)), 0o644); err != nil {
+		return nil, err
+	}
+
+	return contexts, nil
+}
+
+func SyncContext(projectRoot, rawContext string) ([]string, error) {
+	contextName, err := normalizeName(rawContext)
+	if err != nil {
+		return nil, fmt.Errorf("invalid context name: %w", err)
+	}
+	contextDir := filepath.Join(projectRoot, "internal", "core", "contexts", contextName)
+	if !exists(contextDir) {
+		return nil, fmt.Errorf("context not found: %s", contextName)
+	}
+
+	modulePath := readModulePath(projectRoot)
+	if modulePath == "" {
+		return nil, fmt.Errorf("go.mod module path not found in %s", projectRoot)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(contextDir, "module.go"),
+		[]byte(contextModuleTemplate(contextName)),
+		0o644,
+	); err != nil {
+		return nil, err
+	}
+
+	usecaseConstructors, err := discoverConstructorsInDir(filepath.Join(contextDir, "application", "usecase"))
+	if err != nil {
+		return nil, err
+	}
+	serviceConstructors, err := discoverConstructorsInDir(filepath.Join(contextDir, "application", "service"))
+	if err != nil {
+		return nil, err
+	}
+
+	moduleGen := renderContextModuleGen(modulePath, contextName, usecaseConstructors, serviceConstructors)
+	if err := os.WriteFile(filepath.Join(contextDir, "module_gen.go"), []byte(moduleGen), 0o644); err != nil {
+		return nil, err
+	}
+
+	return []string{contextName}, nil
+}
+
+func SyncAll(projectRoot string) ([]string, error) {
+	contexts, err := listContexts(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	for _, ctx := range contexts {
+		if _, err := SyncContext(projectRoot, ctx); err != nil {
+			return nil, err
+		}
+	}
+	return SyncCore(projectRoot)
+}
+
+func listContexts(projectRoot string) ([]string, error) {
+	contextsDir := filepath.Join(projectRoot, "internal", "core", "contexts")
+	if err := os.MkdirAll(contextsDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(contextsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	contexts := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		moduleFile := filepath.Join(contextsDir, e.Name(), "module.go")
+		if !exists(moduleFile) {
+			continue
+		}
+		contexts = append(contexts, e.Name())
+	}
+	sort.Strings(contexts)
+	return contexts, nil
+}
+
+func discoverConstructorsInDir(dir string) ([]string, error) {
+	if !exists(dir) {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(entries))
+	unique := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+
+		content := string(data)
+		if !constructorPattern.MatchString(content) {
+			// Helper/type-only files are allowed in add-managed folders.
+			continue
+		}
+		if !fxDepsPattern.MatchString(content) {
+			return nil, fmt.Errorf("strict sync failed: %s must define Deps struct embedding fx.In", path)
+		}
+
+		matches := fxConstructorPattern.FindAllStringSubmatch(content, -1)
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("strict sync failed: %s must have constructor `New...(deps ...Deps)`", path)
+		}
+		for _, m := range matches {
+			if len(m) < 2 {
+				continue
+			}
+			name := m[1]
+			if _, ok := unique[name]; ok {
+				continue
+			}
+			unique[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+
+	sort.Strings(names)
+	return names, nil
+}
+
+func renderContextsGen(contexts []string) string {
+	lines := []string{
+		"// Code generated by vandor sync core. DO NOT EDIT.",
+		"package gen",
+		"",
+		"var Contexts = []string{",
+	}
+	for _, c := range contexts {
+		lines = append(lines, fmt.Sprintf("\t%q,", c))
+	}
+	lines = append(lines, "}")
+	lines = append(lines, "")
+	return strings.Join(lines, "\n")
+}
+
+func renderCoreModulesGen(modulePath string, contexts []string) string {
+	lines := []string{
+		"// Code generated by vandor sync core. DO NOT EDIT.",
+		"package gen",
+		"",
+		"import (",
+		"\t\"go.uber.org/fx\"",
+	}
+	for _, ctx := range contexts {
+		lines = append(lines, fmt.Sprintf("\t%s %q", ctx, modulePath+"/internal/core/contexts/"+ctx))
+	}
+	lines = append(lines, ")")
+	lines = append(lines, "")
+
+	lines = append(lines, "var CoreModule = fx.Options(")
+	for _, ctx := range contexts {
+		lines = append(lines, fmt.Sprintf("\t%s.Module,", ctx))
+	}
+	lines = append(lines, ")")
+	lines = append(lines, "")
+
+	lines = append(lines, "var AppModule = fx.Options(")
+	lines = append(lines, "\tCoreModule,")
+	lines = append(lines, ")")
+	lines = append(lines, "")
+
+	lines = append(lines, "var WorkerModule = fx.Options(")
+	lines = append(lines, "\tCoreModule,")
+	lines = append(lines, ")")
+	lines = append(lines, "")
+
+	lines = append(lines, "var ContextModules = map[string]fx.Option{")
+	for _, ctx := range contexts {
+		lines = append(lines, fmt.Sprintf("\t%q: %s.Module,", ctx, ctx))
+	}
+	lines = append(lines, "}")
+	lines = append(lines, "")
+
+	return strings.Join(lines, "\n")
+}
+
+func contextModuleTemplate(contextName string) string {
+	lines := []string{
+		"// Code generated by vandor sync context. DO NOT EDIT.",
+		"package " + contextName,
+		"",
+		`import "go.uber.org/fx"`,
+		"",
+		"var Module = fx.Options(",
+		"\tgeneratedModule,",
+		")",
+		"",
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderContextModuleGen(modulePath, contextName string, usecaseConstructors, serviceConstructors []string) string {
+	lines := []string{
+		"// Code generated by vandor sync context. DO NOT EDIT.",
+		"package " + contextName,
+		"",
+		"import (",
+		"\t\"go.uber.org/fx\"",
+	}
+
+	hasUsecase := len(usecaseConstructors) > 0
+	hasService := len(serviceConstructors) > 0
+	if hasUsecase {
+		lines = append(lines, fmt.Sprintf("\tusecase %q", modulePath+"/internal/core/contexts/"+contextName+"/application/usecase"))
+	}
+	if hasService {
+		lines = append(lines, fmt.Sprintf("\tservice %q", modulePath+"/internal/core/contexts/"+contextName+"/application/service"))
+	}
+	lines = append(lines, ")")
+	lines = append(lines, "")
+
+	if !hasUsecase && !hasService {
+		lines = append(lines, "var generatedModule = fx.Options()")
+		lines = append(lines, "")
+		return strings.Join(lines, "\n")
+	}
+
+	lines = append(lines, "var generatedModule = fx.Options(")
+	lines = append(lines, "\tfx.Provide(")
+	for _, name := range usecaseConstructors {
+		lines = append(lines, fmt.Sprintf("\t\tusecase.%s,", name))
+	}
+	for _, name := range serviceConstructors {
+		lines = append(lines, fmt.Sprintf("\t\tservice.%s,", name))
+	}
+	lines = append(lines, "\t),")
+	lines = append(lines, ")")
+	lines = append(lines, "")
+	return strings.Join(lines, "\n")
+}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/peiman/ckeletin-go/cmd"
+	"github.com/alfariiizi/vandor/cmd"
 )
 
 func run() int {

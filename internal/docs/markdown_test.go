@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peiman/ckeletin-go/.ckeletin/pkg/config"
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/config"
 )
 
 // TestGenerateMarkdownDocs tests the basic structure of generated markdown documentation

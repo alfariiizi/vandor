@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peiman/ckeletin-go/.ckeletin/pkg/config"
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/config"
 )
 
 // MockWriteCloser is a simple implementation of io.WriteCloser for testing

@@ -1,4 +1,4 @@
-module github.com/peiman/ckeletin-go
+module github.com/alfariiizi/vandor
 
 go 1.24.0
 

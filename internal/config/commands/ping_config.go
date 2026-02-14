@@ -24,7 +24,7 @@
 
 package commands
 
-import "github.com/peiman/ckeletin-go/.ckeletin/pkg/config"
+import "github.com/alfariiizi/vandor/.ckeletin/pkg/config"
 
 // PingMetadata defines all metadata for the ping command
 var PingMetadata = config.CommandMetadata{

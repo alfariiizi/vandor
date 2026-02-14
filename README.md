@@ -30,18 +30,28 @@ Vandor is designed for three realities:
 2. team collaboration with strict context boundaries
 3. long-term transition from modular monolith to microservices
 
-## Command Surface (Planned/Core)
+## Command Surface
+
+Phase-1 available now:
 
 1. `vandor new <project> [--module ...]`
+   - supports `--tidy auto|always|never` (default: `auto`)
 2. `vandor add context <name>`
-3. `vandor add domain <context>`
-4. `vandor add usecase <context> <name>`
-5. `vandor add service <context> <name>`
-6. `vandor sync core|context|all`
-7. `vandor vpkg add|remove|list|sync|exec|doctor`
-8. `vandor run:app|worker|scheduler|all`
-9. `vandor dev:app|worker|scheduler|all`
-10. `vandor tui`
+   - supports `--tidy auto|always|never` (default: `auto`)
+3. `vandor add domain <context> <name>`
+4. `vandor add valueobject <context> <name> [--kind ...] [--enum ...]`
+5. `vandor add usecase <context> <name>`
+6. `vandor add service <context> <name>`
+7. `vandor sync core|context|all`
+7. `vandor vpkg add|remove|list|sync|doctor` (placeholder responses for Phase-2)
+8. `vandor run:app|run:worker`
+9. `vandor dev:app|dev:worker`
+10. `vandor tui` (Phase-1 placeholder, TTY-only)
+
+Notes:
+
+1. `vandor add ...` commands auto-run sync wiring for affected context + core.
+2. `vandor sync ...` remains available for explicit/manual resync.
 
 ## Architecture Boundary
 

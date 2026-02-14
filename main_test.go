@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/peiman/ckeletin-go/cmd"
+	"github.com/alfariiizi/vandor/cmd"
 	"github.com/spf13/cobra"
 )
 

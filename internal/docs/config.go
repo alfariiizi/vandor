@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/peiman/ckeletin-go/.ckeletin/pkg/config"
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/config"
 )
 
 // Define output format types
