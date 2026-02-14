@@ -1,0 +1,23 @@
+// cmd/template.go
+
+package cmd
+
+import (
+	"github.com/peiman/ckeletin-go/internal/config/commands"
+	"github.com/peiman/ckeletin-go/internal/template"
+	"github.com/spf13/cobra"
+)
+
+var templateCmd = NewCommand(commands.TemplateMetadata, runTemplate)
+
+func init() {
+	MustAddToRoot(templateCmd)
+}
+
+func runTemplate(cmd *cobra.Command, args []string) error {
+	cfg := template.Config{
+		ExampleOption: getConfigValueWithFlags[string](cmd, "example-flag", "app.template.example_option"),
+		// Add more config fields as needed
+	}
+	return template.NewExecutor(cfg, cmd.OutOrStdout()).Execute()
+}

@@ -1,0 +1,384 @@
+name: CI and Release Workflow
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*" # Trigger for all tags
+
+  pull_request:
+    branches:
+      - main
+
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday at midnight UTC (catch upstream license changes)
+
+# Concurrency controls to prevent wasting CI minutes
+# Cancel in-progress runs for PRs, but let main branch builds complete
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # GO_VERSION is read from .go-version file (SSOT)
+  # Use setup-go's go-version-file parameter instead of hardcoding
+  YQ_VERSION: '4.34.1'       # Define yq version here
+  TASK_VERSION: '3.39.2'     # Define Task version here
+  # Pinned tool versions for cache key (must match .ckeletin/Taskfile.yml)
+  PINNED_TOOLS_VERSION: 'v1'  # Bump to invalidate cache when tool versions change
+
+jobs:
+  # Matrix testing across multiple OS and Go versions
+  # Only runs on main branch pushes and releases (expensive runners)
+  test-matrix:
+    name: Test on ${{ matrix.os }}
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: '.go-version'  # SSOT for Go version
+
+      - name: Cache Go Modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('.go-version') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ hashFiles('.go-version') }}-
+            ${{ runner.os }}-go-
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Install Task (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          INSTALL_DIR="$HOME/.local/bin"
+          mkdir -p "$INSTALL_DIR"
+          curl -sL https://taskfile.dev/install.sh | sh -s -- -b "$INSTALL_DIR" v${{ env.TASK_VERSION }}
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Install Task (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $INSTALL_DIR = "$env:USERPROFILE\.local\bin"
+          New-Item -ItemType Directory -Force -Path $INSTALL_DIR
+          $TASK_URL = "https://github.com/go-task/task/releases/download/v${{ env.TASK_VERSION }}/task_windows_amd64.zip"
+          Invoke-WebRequest -Uri $TASK_URL -OutFile task.zip
+          Expand-Archive -Path task.zip -DestinationPath $INSTALL_DIR -Force
+          Remove-Item task.zip
+          echo "$INSTALL_DIR" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Verify Task Installation
+        run: task --version
+
+      - name: Cache Dev Tools (pinned versions)
+        id: cache-devtools
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-devtools-${{ hashFiles('.go-version') }}-${{ env.PINNED_TOOLS_VERSION }}
+
+      - name: Add Go bin to PATH (Unix)
+        if: runner.os != 'Windows'
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Add Go bin to PATH (Windows)
+        if: runner.os == 'Windows'
+        run: echo "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Install Pinned Tools
+        if: steps.cache-devtools.outputs.cache-hit != 'true'
+        run: task setup:pinned
+
+      - name: Install Latest Tools (always fresh)
+        run: task setup:latest
+
+      - name: Build
+        run: task build
+
+      - name: Run Tests with Race Detection (Unix)
+        if: runner.os != 'Windows'
+        run: task test:race
+
+      - name: Run Tests (Windows - no race detector)
+        if: runner.os == 'Windows'
+        run: task test
+
+  # Test dev vs prod builds to ensure build tags work correctly
+  # Only runs on main branch pushes and releases (not needed for every PR)
+  test-dev-prod:
+    name: Test Dev/Prod Build Separation
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: '.go-version'  # SSOT for Go version
+
+      - name: Cache Go Modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-devprod-${{ hashFiles('.go-version') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-devprod-${{ hashFiles('.go-version') }}-
+            ${{ runner.os }}-go-
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Install Task
+        run: |
+          INSTALL_DIR="$HOME/.local/bin"
+          mkdir -p "$INSTALL_DIR"
+          curl -sL https://taskfile.dev/install.sh | sh -s -- -b "$INSTALL_DIR" v${{ env.TASK_VERSION }}
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+
+      - name: Cache Dev Tools (pinned versions)
+        id: cache-devtools
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-devtools-${{ hashFiles('.go-version') }}-${{ env.PINNED_TOOLS_VERSION }}
+
+      - name: Add Go bin to PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Install Pinned Tools
+        if: steps.cache-devtools.outputs.cache-hit != 'true'
+        run: task setup:pinned
+
+      - name: Install Latest Tools (always fresh)
+        run: task setup:latest
+
+      - name: Get Binary Name from SSOT
+        id: binary-name
+        run: |
+          BINARY_NAME=$(grep 'BINARY_NAME:' Taskfile.yml | head -1 | awk '{print $2}')
+          echo "name=$BINARY_NAME" >> "$GITHUB_OUTPUT"
+          echo "Binary name: $BINARY_NAME"
+
+      - name: Build Dev Binary
+        run: task build:dev
+
+      - name: Verify Dev Commands Exist
+        run: |
+          echo "Testing dev build..."
+          ./${{ steps.binary-name.outputs.name }} dev --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} dev config --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} dev doctor --help > /dev/null
+          echo "✅ Dev commands exist in dev build"
+
+      - name: Run Tests with Dev Tag
+        run: task test:dev
+
+      - name: Build Production Binary
+        run: task build:prod
+
+      - name: Verify Dev Commands Hidden
+        run: |
+          echo "Testing production build..."
+          if ./${{ steps.binary-name.outputs.name }} dev 2>&1 | grep -q "unknown command"; then
+            echo "✅ Dev commands hidden in production build"
+          else
+            echo "❌ Dev commands should not exist in production build"
+            exit 1
+          fi
+
+      - name: Run Tests without Dev Tag
+        run: task test:prod
+
+  # Main build job with quality checks (Linux only)
+  # PRs: Fast checks (format, lint, validate, unit tests) - ~2-3 min
+  # Main/releases: Full checks (+ security, license, integration) - ~5-8 min
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Only need read access for checkout and build
+      pull-requests: write # Needed for codecov comment
+      checks: write # Needed for test result reporting
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: '.go-version'  # SSOT for Go version
+
+      - name: Cache Go Modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            /go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('.go-version') }}-${{ hashFiles('**/go.sum', 'Taskfile.yml') }}
+
+      - name: Cache Task Binary
+        id: cache-task
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/bin/task
+          key: ${{ runner.os }}-task-${{ env.TASK_VERSION }}
+
+      - name: Install Task
+        if: steps.cache-task.outputs.cache-hit != 'true'
+        run: |
+          INSTALL_DIR="$HOME/.local/bin"
+          TASK_INSTALL_SCRIPT_URL="https://taskfile.dev/install.sh"
+          mkdir -p "$INSTALL_DIR"
+          curl -sL "$TASK_INSTALL_SCRIPT_URL" | sh -s -- -b "$INSTALL_DIR" v${{ env.TASK_VERSION }}
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Add Task to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Display Task Version
+        run: task --version
+
+      - name: Cache Dev Tools (pinned versions)
+        id: cache-devtools
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-devtools-${{ hashFiles('.go-version') }}-${{ env.PINNED_TOOLS_VERSION }}
+
+      - name: Add Go bin to PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Install Pinned Tools
+        if: steps.cache-devtools.outputs.cache-hit != 'true'
+        run: task setup:pinned
+
+      - name: Install Latest Tools (always fresh)
+        run: |
+          task setup:latest
+          lefthook install
+
+      - name: Install semgrep (full checks only)
+        if: github.event_name != 'pull_request'
+        run: pip3 install --user semgrep
+
+      - name: Get Binary Name from SSOT
+        id: binary-name
+        run: |
+          BINARY_NAME=$(grep 'BINARY_NAME:' Taskfile.yml | head -1 | awk '{print $2}')
+          echo "name=$BINARY_NAME" >> "$GITHUB_OUTPUT"
+          echo "Binary name: $BINARY_NAME"
+
+      - name: Run Quality Checks (Fast - PRs only)
+        if: github.event_name == 'pull_request'
+        run: task check:fast
+
+      - name: Run Quality Checks (Full - main/releases)
+        if: github.event_name != 'pull_request'
+        run: task check
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: env.CODECOV_TOKEN != ''
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: ./coverage.txt
+          fail_ci_if_error: ${{ github.event_name != 'pull_request' }}
+          verbose: true
+          flags: unittests
+          name: codecov-${{ steps.binary-name.outputs.name }}
+
+      - name: Generate License Report
+        if: github.event_name != 'pull_request'
+        run: task generate:license:report
+
+      - name: Upload License Report
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v6
+        with:
+          name: license-report
+          path: |
+            reports/licenses.csv
+            reports/license-errors.log
+          retention-days: 90
+
+  release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') # Only run on tags
+    needs: [test-matrix, build] # Ensure all tests pass before release
+    permissions:
+      contents: write # Need write access to create releases
+      packages: read # For package access if needed
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # GoReleaser needs full git history
+
+      - name: Validate SEMVER Tag
+        id: validate_tag
+        run: |
+          TAG_NAME="${GITHUB_REF##*/}"
+          # Safely handle the tag name
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_ENV"
+          if [[ ! "$TAG_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-([a-zA-Z0-9.-]+))?(\+([a-zA-Z0-9.-]+))?$ ]]; then
+            echo "❌ Invalid SEMVER tag: $TAG_NAME"
+            exit 1
+          fi
+          echo "✅ Valid SEMVER tag: $TAG_NAME"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: '.go-version'  # SSOT for Go version
+
+      - name: Cache Go Modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            /go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('.go-version') }}-${{ hashFiles('**/go.sum', 'Taskfile.yml') }}
+
+      - name: Install Syft for SBOM generation
+        uses: anchore/sbom-action/download-syft@v0.22.0
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.CKELETIN_GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

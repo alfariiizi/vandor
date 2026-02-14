@@ -1,0 +1,46 @@
+name: Trivy Security Scan
+
+# Only run on main branch pushes and weekly schedule
+# PRs are covered by task check:fast (secrets scan)
+# Full security scan (trivy + grype) runs on main
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Run weekly on Monday at 10:00 UTC
+    - cron: '0 10 * * 1'
+
+jobs:
+  trivy-scan:
+    name: Trivy Vulnerability Scanner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # Required for uploading SARIF results
+      actions: read # Required for trivy telemetry
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Run Trivy Vulnerability Scanner in Repo Mode
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          # Scan for vulnerabilities in:
+          # - Go dependencies (go.mod)
+          # - Filesystem misconfigurations
+          # - Secret scanning
+          scanners: 'vuln,misconfig,secret'
+
+      - name: Upload Trivy Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-filesystem'

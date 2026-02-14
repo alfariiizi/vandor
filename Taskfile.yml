@@ -1,0 +1,279 @@
+# Taskfile.yml - Project tasks
+# This file includes the ckeletin framework and adds project-specific tasks.
+version: '3'
+
+vars:
+  # Project configuration - customize these for your CLI
+  BINARY_NAME: ckeletin-go
+  MODULE_PATH:
+    sh: go list -m
+
+includes:
+  ckeletin:
+    taskfile: .ckeletin/Taskfile.yml
+    vars:
+      BINARY_NAME: '{{.BINARY_NAME}}'
+      MODULE_PATH: '{{.MODULE_PATH}}'
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  # === Convenience Aliases ===
+  # These let you run `task check` instead of `task ckeletin:check`
+
+  setup:
+    desc: Install development tools
+    cmds: [task: ckeletin:setup]
+
+  setup:pinned:
+    desc: Install pinned dev tools (cacheable in CI)
+    cmds: [task: ckeletin:setup:pinned]
+
+  setup:latest:
+    desc: Install @latest tools (security tools, always fresh)
+    cmds: [task: ckeletin:setup:latest]
+
+  doctor:
+    desc: Check development environment
+    cmds: [task: ckeletin:doctor]
+
+  format:
+    desc: Format all Go code
+    cmds: [task: ckeletin:format]
+
+  lint:
+    desc: Run all linters
+    cmds: [task: ckeletin:lint]
+
+  test:
+    desc: Run tests with coverage
+    cmds: [task: ckeletin:test]
+
+  build:
+    desc: Build the binary
+    cmds: [task: ckeletin:build]
+
+  check:
+    desc: Run all quality checks
+    cmds: [task: ckeletin:check]
+
+  check:fast:
+    desc: Run fast quality checks
+    cmds: [task: ckeletin:check:fast]
+
+  clean:
+    desc: Clean all artifacts
+    cmds: [task: ckeletin:clean]
+
+  # === Validate Aliases ===
+
+  validate:constants:
+    desc: Validate config constants are in sync with registry
+    cmds: [task: ckeletin:validate:constants]
+
+  validate:commands:
+    desc: Validate command files follow ultra-thin patterns
+    cmds: [task: ckeletin:validate:commands]
+
+  validate:defaults:
+    desc: Validate no unauthorized viper.SetDefault() calls
+    cmds: [task: ckeletin:validate:defaults]
+
+  validate:layering:
+    desc: Validate 4-layer architecture dependency rules
+    cmds: [task: ckeletin:validate:layering]
+
+  validate:security:
+    desc: Validate security patterns
+    cmds: [task: ckeletin:validate:security]
+
+  validate:architecture:
+    desc: Validate architecture documentation follows SSOT pattern
+    cmds: [task: ckeletin:validate:architecture]
+
+  validate:package-organization:
+    desc: Validate package organization follows CLI-first strategy
+    cmds: [task: ckeletin:validate:package-organization]
+
+  validate:config-consumption:
+    desc: Validate type-safe config consumption pattern
+    cmds: [task: ckeletin:validate:config-consumption]
+
+  validate:output:
+    desc: Validate output patterns
+    cmds: [task: ckeletin:validate:output]
+
+  validate:task-naming:
+    desc: Validate task names follow action:target pattern
+    cmds: [task: ckeletin:validate:task-naming]
+
+  # === Hook Aliases (used by .lefthook.yml) ===
+
+  format:staged:
+    cmds: [task: ckeletin:format:staged]
+
+  check:deps:verify:
+    cmds: [task: ckeletin:check:deps:verify]
+
+  check:secrets:staged:
+    cmds: [task: ckeletin:check:secrets:staged]
+
+  check:vuln:fast:
+    cmds: [task: ckeletin:check:vuln:fast]
+
+  test:coverage:
+    cmds: [task: ckeletin:test:coverage]
+
+  test:unit:
+    desc: Run unit tests only (fast, skips integration tests)
+    cmds: [task: ckeletin:test:unit]
+
+  test:race:
+    desc: Run tests with race detection
+    cmds: [task: ckeletin:test:race]
+
+  test:dev:
+    desc: Run tests with dev commands
+    cmds: [task: ckeletin:test:dev]
+
+  test:prod:
+    desc: Run tests without dev commands
+    cmds: [task: ckeletin:test:prod]
+
+  test:integration:
+    desc: Run integration tests
+    cmds: [task: ckeletin:test:integration]
+
+  build:dev:
+    desc: Build the binary with dev commands
+    cmds: [task: ckeletin:build:dev]
+
+  build:prod:
+    desc: Build production binary without dev commands
+    cmds: [task: ckeletin:build:prod]
+
+  # === Generate Aliases ===
+
+  generate:config:key-constants:
+    desc: Generate type-safe config key constants
+    cmds: [task: ckeletin:generate:config:key-constants]
+
+  generate:license:report:
+    desc: Generate license report (CSV format)
+    cmds: [task: ckeletin:generate:license:report]
+
+  # === Project-Specific Tasks ===
+
+  init:
+    desc: Initialize scaffold with custom name and module
+    summary: |
+      Automates scaffold customization by updating module path and binary name
+      throughout the codebase. This is the first command you run after cloning.
+
+      Usage:
+        task init name=<name> module=<module>
+
+      Example:
+        task init name=myapp module=github.com/myuser/myapp
+    vars:
+      NAME: "{{.name}}"
+      MODULE: "{{.module}}"
+      OLD_MODULE: "github.com/peiman/ckeletin-go"
+      OLD_NAME: "ckeletin-go"
+    preconditions:
+      - sh: '[ -n "{{.NAME}}" ]'
+        msg: "Binary name is required. Usage: task init name=<name> module=<module>"
+      - sh: '[ -n "{{.MODULE}}" ]'
+        msg: "Module path is required. Usage: task init name=<name> module=<module>"
+      - sh: '[ "{{.MODULE}}" != "{{.OLD_MODULE}}" ]'
+        msg: "Module path must be different from {{.OLD_MODULE}}"
+    cmds:
+      - echo "🚀 Initializing scaffold..."
+      - go run .ckeletin/scripts/scaffold-init.go "{{.OLD_MODULE}}" "{{.MODULE}}" "{{.OLD_NAME}}" "{{.NAME}}"
+      - go mod tidy
+      - |
+        # Create initial version tag for clean --version output
+        if ! git tag | grep -q "^v"; then
+          git tag -a v0.0.0 -m "Initial version"
+          echo "  ✓ Created initial version tag v0.0.0"
+        fi
+      - echo ""
+      - echo "✅ Scaffold initialized successfully!"
+      - echo "   Binary{{":"}} {{.NAME}}"
+      - echo "   Module{{":"}} {{.MODULE}}"
+      - echo "   Version{{":"}} v0.0.0"
+      - echo ""
+      - echo "Next steps{{":"}}"
+      - echo "  1. Format code{{":"}} task format"
+      - echo "  2. Review changes{{":"}} git diff"
+      - echo "  3. Run quality checks{{":"}} task check"
+      - echo "  4. Build binary{{":"}} task build"
+      - echo "  5. Test binary{{":"}} ./{{.NAME}} --version"
+
+  generate:command:
+    desc: Scaffold a new ultra-thin command with metadata and options
+    vars:
+      NAME: "{{.name}}"
+      CMD_FILE: "cmd/{{.NAME}}.go"
+      CFG_FILE: "internal/config/commands/{{.NAME}}_config.go"
+    cmds:
+      - |
+        if [ -z "{{.NAME}}" ]; then
+          echo "Usage: task generate:command name=<command_name>" >&2; exit 1; fi
+      - |
+        cp cmd/template_command.go.example {{.CMD_FILE}}
+        # Cross-platform sed: macOS requires '' after -i, Linux doesn't
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/template/{{.NAME}}/g" {{.CMD_FILE}}
+          sed -i '' "s/Template/{{.NAME | title}}/g" {{.CMD_FILE}}
+        else
+          sed -i "s/template/{{.NAME}}/g" {{.CMD_FILE}}
+          sed -i "s/Template/{{.NAME | title}}/g" {{.CMD_FILE}}
+        fi
+      - |
+        cp internal/config/commands/template_config.go.example {{.CFG_FILE}}
+        # Cross-platform sed: macOS requires '' after -i, Linux doesn't
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/template/{{.NAME}}/g" {{.CFG_FILE}}
+          sed -i '' "s/Template/{{.NAME | title}}/g" {{.CFG_FILE}}
+        else
+          sed -i "s/template/{{.NAME}}/g" {{.CFG_FILE}}
+          sed -i "s/Template/{{.NAME | title}}/g" {{.CFG_FILE}}
+        fi
+      - echo "✅ Scaffolded ultra-thin command"
+      - echo "   Command {{.CMD_FILE}}"
+      - echo "   Config {{.CFG_FILE}}"
+      - echo ""
+      - echo "Next steps"
+      - echo "1. Create business logic in internal/{{.NAME}}/"
+      - echo "2. Update metadata and options in {{.CFG_FILE}}"
+      - echo "3. Update runTemplate function in {{.CMD_FILE}}"
+      - echo "4. Run task ckeletin:validate:commands to verify pattern"
+
+  generate:docs:config:
+    desc: Generate configuration documentation
+    cmds:
+      - echo "Generating configuration documentation..."
+      - mkdir -p docs
+      - ./{{.BINARY_NAME}} docs config --output=docs/configuration.md
+      - echo "Configuration documentation saved to docs/configuration.md"
+    deps: [build]
+
+  generate:config:template:
+    desc: Generate YAML configuration template
+    cmds:
+      - echo "Generating YAML configuration template..."
+      - mkdir -p docs
+      - ./{{.BINARY_NAME}} docs config --format=yaml --output=docs/config-template.yaml
+      - echo "YAML template saved to docs/config-template.yaml"
+    deps: [build]
+
+  generate:docs:
+    desc: Generate all documentation
+    cmds:
+      - task: generate:docs:config
+      - task: generate:config:template
+    silent: true

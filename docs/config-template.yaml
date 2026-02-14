@@ -1,0 +1,21 @@
+app:
+  # Logging level for the application (trace, debug, info, warn, error, fatal, panic)
+  log_level: debug
+
+  docs:
+    # Output format for documentation (markdown, yaml)
+    output_format: yaml
+
+    # Output file for documentation (defaults to stdout)
+    output_file: /path/to/output.md
+
+  ping:
+    # Default message to display for the ping command
+    output_message: Hello World!
+
+    # Text color for ping command output (white, red, green, blue, cyan, yellow, magenta)
+    output_color: green
+
+    # Enable interactive UI for the ping command
+    ui: true
+
