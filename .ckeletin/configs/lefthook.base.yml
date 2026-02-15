@@ -13,23 +13,23 @@ pre-commit:
   commands:
     format:
       glob: "*.go"
-      run: task format:staged -- {staged_files}
+      run: .ckeletin/scripts/taskw.sh format:staged -- {staged_files}
       stage_fixed: true
     lint:
-      run: task lint
+      run: .ckeletin/scripts/taskw.sh lint
     validate-constants:
-      run: task validate:constants
+      run: .ckeletin/scripts/taskw.sh validate:constants
     verify-deps:
-      run: task check:deps:verify
+      run: .ckeletin/scripts/taskw.sh check:deps:verify
     secret-scan:
-      run: task check:secrets:staged
+      run: .ckeletin/scripts/taskw.sh check:secrets:staged
     vuln-scan:
-      run: task check:vuln:fast
+      run: .ckeletin/scripts/taskw.sh check:vuln:fast
     test:
-      run: task test:unit
+      run: .ckeletin/scripts/taskw.sh test:unit
 
 pre-push:
   parallel: false
   commands:
     coverage:
-      run: task test:coverage
+      run: .ckeletin/scripts/taskw.sh test:coverage
