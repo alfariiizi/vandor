@@ -38,6 +38,7 @@ func (a *Alias) UnmarshalYAML(node *yaml.Node) error {
 
 func LoadManifestFromDir(packageRoot string) (Manifest, []byte, error) {
 	path := filepath.Join(packageRoot, manifestFileName)
+	// nosemgrep: go-path-traversal -- packageRoot is resolved from local/cache/git sources managed by vpkg resolver.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Manifest{}, nil, err

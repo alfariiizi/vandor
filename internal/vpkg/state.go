@@ -26,6 +26,7 @@ const (
 
 func LoadState(projectRoot string) (State, error) {
 	path := filepath.Join(projectRoot, stateFileName)
+	// nosemgrep: go-path-traversal -- path is fixed file name under project root.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -56,6 +57,7 @@ func SaveState(projectRoot string, state State) error {
 
 func LoadLock(projectRoot string) (Lock, error) {
 	path := filepath.Join(projectRoot, lockFileName)
+	// nosemgrep: go-path-traversal -- path is fixed file name under project root.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

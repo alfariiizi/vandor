@@ -149,6 +149,7 @@ func discoverConstructorsInDir(dir string) ([]string, error) {
 
 		path := filepath.Join(dir, entry.Name())
 		// #nosec G304 -- path is constrained to discovered files in the managed context directory.
+		// nosemgrep: go-path-traversal -- path is discovered from os.ReadDir(dir) within managed context tree.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err

@@ -79,6 +79,7 @@ func runTidy(projectDir, mode string) (string, error) {
 }
 
 func readModuleFromGoMod(projectDir string) (string, error) {
+	// nosemgrep: go-path-traversal -- projectDir is resolved and created by vandor init flow.
 	data, err := os.ReadFile(filepath.Join(projectDir, "go.mod"))
 	if err != nil {
 		return "", err

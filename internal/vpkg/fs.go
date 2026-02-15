@@ -33,6 +33,7 @@ func copyDir(src, dst string) error {
 
 func copyFile(src, dst string) error {
 	// #nosec G304 -- source path is produced by controlled package sync/install flow.
+	// nosemgrep: go-path-traversal -- source path comes from validated package target mapping.
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -58,6 +59,7 @@ func copyFile(src, dst string) error {
 
 func fileSHA256(path string) (string, error) {
 	// #nosec G304 -- path is provided by controlled ownership/cache traversal.
+	// nosemgrep: go-path-traversal -- path is sourced from managed cache/ownership index.
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

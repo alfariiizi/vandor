@@ -555,6 +555,7 @@ func coreContractsFiles(projectRoot string) map[string]string {
 
 func readModulePath(projectRoot string) string {
 	// #nosec G304 -- read path is constrained to project root + go.mod.
+	// nosemgrep: go-path-traversal -- projectRoot is vandor-managed workspace root.
 	data, err := os.ReadFile(filepath.Join(projectRoot, "go.mod"))
 	if err != nil {
 		return ""
