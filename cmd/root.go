@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -41,7 +42,25 @@ hexagonal architecture + DDD boundaries and vpkg-based transport/infrastructure 
 
 func Execute() error {
 	RootCmd.Version = fmt.Sprintf("%s, commit %s, built at %s", Version, Commit, Date)
-	return RootCmd.Execute()
+	_, aliasCandidate := parseAliasShortcut(os.Args[1:])
+	prevSilenceErrors := RootCmd.SilenceErrors
+	prevSilenceUsage := RootCmd.SilenceUsage
+	if aliasCandidate {
+		// Avoid printing Cobra unknown-command noise when we intend to fallback to vpkg alias execution.
+		RootCmd.SilenceErrors = true
+		RootCmd.SilenceUsage = true
+	}
+	err := RootCmd.Execute()
+	RootCmd.SilenceErrors = prevSilenceErrors
+	RootCmd.SilenceUsage = prevSilenceUsage
+	if err == nil {
+		return nil
+	}
+	handled, fallbackErr := tryHandleAliasShortcut(err, os.Args[1:], RootCmd.OutOrStdout(), RootCmd.ErrOrStderr())
+	if handled {
+		return fallbackErr
+	}
+	return err
 }
 
 func init() {

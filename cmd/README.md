@@ -7,11 +7,12 @@ This package defines Vandor CLI command surface for Phase-1.
 1. `new`
 2. `add context|domain|valueobject|usecase|service` (`valueobject` supports `--kind` and `--enum`)
 3. `sync core|context|all`
-4. `vpkg add|remove|list|sync|doctor` (placeholder)
-5. `dev:app|dev:worker`
-6. `run:app|run:worker`
-7. `tui` (TTY-only placeholder)
-8. `completion`
+4. `vpkg add|remove|list|search|sync|doctor|exec|exec-alias`
+5. `vpkg registry add|list|remove`
+6. `dev:app|dev:worker`
+7. `run:app|run:worker`
+8. `tui` (TTY-only placeholder)
+9. `completion`
 
 ## Interaction Model
 
@@ -24,3 +25,12 @@ This package defines Vandor CLI command surface for Phase-1.
 1. Core scaffolding logic lives in `internal/coregen`.
 2. Command output can be `--output text|json`.
 3. `add` commands auto-sync affected context + core wiring.
+4. `vpkg add --plan` prints dry-run plan without applying writes.
+5. `vpkg add` resolves and installs missing dependencies first.
+6. `vpkg add` accepts registry aliases with and without `@` prefix.
+7. Default registry tier order is `official -> verified -> community` when `vpkg.yaml` is missing.
+8. Interactive confirmation for write operations is enabled when `-it` is used.
+9. `vpkg doctor --fix` re-syncs installed package files from lock cache to repair drift.
+10. `vpkg remove` protects dependency graph by default; use `--force` to bypass.
+11. Root-level alias fallback is enabled for `:` commands (example: `vandor add:http-handler`).
+12. `vpkg search` supports `--limit` (default `10`) and `--offset` pagination flags.

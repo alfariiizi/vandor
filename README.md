@@ -43,15 +43,34 @@ Phase-1 available now:
 5. `vandor add usecase <context> <name>`
 6. `vandor add service <context> <name>`
 7. `vandor sync core|context|all`
-7. `vandor vpkg add|remove|list|sync|doctor` (placeholder responses for Phase-2)
-8. `vandor run:app|run:worker`
-9. `vandor dev:app|dev:worker`
-10. `vandor tui` (Phase-1 placeholder, TTY-only)
+8. `vandor vpkg add|remove|list|search|sync|doctor|exec|exec-alias`
+9. `vandor vpkg registry add|list|remove`
+10. `vandor run:app|run:worker`
+11. `vandor dev:app|dev:worker`
+12. `vandor tui` (Phase-1 placeholder, TTY-only)
 
 Notes:
 
 1. `vandor add ...` commands auto-run sync wiring for affected context + core.
 2. `vandor sync ...` remains available for explicit/manual resync.
+3. Current `vpkg` source support is local-first:
+   - local path (`./path/to/package`)
+   - git source (`github.com/org/repo//packages/pkg@ref` or local git repo path with `//subdir`)
+   - registry alias backed by local/file/http registry URLs in `vpkg.yaml`
+   - bare alias fallback (for example `http-humachi` or `official/http-humachi`)
+   - registry HTTP index resolution baseline
+4. When `vpkg.yaml` does not exist yet, default registries are discovered in order:
+   - `official`
+   - `verified`
+   - `community`
+   (with env override support via `VANDOR_VPKG_REGISTRY_OFFICIAL|VERIFIED|COMMUNITY`)
+5. `vandor vpkg add --plan` provides dry-run install plan without writing files.
+6. `vandor vpkg add` auto-installs dependency chain from package manifest.
+7. In interactive mode (`-it`), `vpkg add` asks confirmation before applying write operations.
+8. `vandor vpkg doctor --fix` attempts safe repair by re-syncing installed packages from cache/lock.
+9. `vandor vpkg remove` now blocks removing a package that is still required by others, unless `--force` is used.
+10. Alias shortcut is supported: unknown command with `:` will fallback to installed vpkg alias (for example `vandor add:http-handler`).
+11. `vandor vpkg search` supports pagination with `--limit` (default `10`) and `--offset`.
 
 ## Architecture Boundary
 

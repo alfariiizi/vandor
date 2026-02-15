@@ -20,6 +20,14 @@ func resetGlobalFlagsForTest() {
 	newModule = ""
 	newForce = false
 	newTidyMode = "auto"
+
+	vpkgPath = "."
+	vpkgAddPlanOnly = false
+	vpkgRemoveForce = false
+	vpkgSearchTier = ""
+	vpkgSearchLimit = 10
+	vpkgSearchOffset = 0
+	vpkgDoctorFix = false
 }
 
 func runRootForTest(args ...string) (string, error) {
@@ -27,6 +35,18 @@ func runRootForTest(args ...string) (string, error) {
 	var out bytes.Buffer
 	RootCmd.SetOut(&out)
 	RootCmd.SetErr(&out)
+	RootCmd.SetIn(strings.NewReader(""))
+	RootCmd.SetArgs(args)
+	err := RootCmd.Execute()
+	return out.String(), err
+}
+
+func runRootForTestWithInput(input string, args ...string) (string, error) {
+	resetGlobalFlagsForTest()
+	var out bytes.Buffer
+	RootCmd.SetOut(&out)
+	RootCmd.SetErr(&out)
+	RootCmd.SetIn(strings.NewReader(input))
 	RootCmd.SetArgs(args)
 	err := RootCmd.Execute()
 	return out.String(), err
