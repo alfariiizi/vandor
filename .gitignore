@@ -19,6 +19,9 @@ ckeletin-go
 # Dependency directories (remove the comment below to include it)
 vendor/
 
+vandor
+main
+
 # Go workspace file
 go.work
 
