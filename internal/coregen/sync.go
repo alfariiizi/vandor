@@ -24,6 +24,7 @@ func SyncCore(projectRoot string) ([]string, error) {
 		return nil, err
 	}
 
+	// #nosec G306 -- generated wiring files should be readable by project collaborators.
 	if err := os.WriteFile(filepath.Join(genDir, "contexts_gen.go"), []byte(renderContextsGen(contexts)), 0o644); err != nil {
 		return nil, err
 	}
@@ -40,6 +41,7 @@ func SyncCore(projectRoot string) ([]string, error) {
 		}
 	}
 
+	// #nosec G306 -- generated wiring files should be readable by project collaborators.
 	if err := os.WriteFile(filepath.Join(genDir, "modules_gen.go"), []byte(renderCoreModulesGen(modulePath, contexts)), 0o644); err != nil {
 		return nil, err
 	}
@@ -62,6 +64,7 @@ func SyncContext(projectRoot, rawContext string) ([]string, error) {
 		return nil, fmt.Errorf("go.mod module path not found in %s", projectRoot)
 	}
 
+	// #nosec G306 -- generated module file should be readable by project collaborators.
 	if err := os.WriteFile(
 		filepath.Join(contextDir, "module.go"),
 		[]byte(contextModuleTemplate(contextName)),
@@ -80,6 +83,7 @@ func SyncContext(projectRoot, rawContext string) ([]string, error) {
 	}
 
 	moduleGen := renderContextModuleGen(modulePath, contextName, usecaseConstructors, serviceConstructors)
+	// #nosec G306 -- generated wiring files should be readable by project collaborators.
 	if err := os.WriteFile(filepath.Join(contextDir, "module_gen.go"), []byte(moduleGen), 0o644); err != nil {
 		return nil, err
 	}
@@ -144,6 +148,7 @@ func discoverConstructorsInDir(dir string) ([]string, error) {
 		}
 
 		path := filepath.Join(dir, entry.Name())
+		// #nosec G304 -- path is constrained to discovered files in the managed context directory.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err

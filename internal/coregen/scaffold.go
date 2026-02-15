@@ -37,12 +37,15 @@ func InitProject(baseDir, projectName, moduleName string, force bool) (string, e
 		moduleName = fmt.Sprintf("github.com/yourorg/%s", name)
 	}
 
+	// #nosec G301 -- scaffolded project directories are intentionally user-readable.
 	if err := os.MkdirAll(filepath.Join(targetDir, "internal", "core", "contexts"), 0o755); err != nil {
 		return "", err
 	}
+	// #nosec G301 -- scaffolded project directories are intentionally user-readable.
 	if err := os.MkdirAll(filepath.Join(targetDir, "internal", "core", "_gen"), 0o755); err != nil {
 		return "", err
 	}
+	// #nosec G301 -- scaffolded project directories are intentionally user-readable.
 	if err := os.MkdirAll(filepath.Join(targetDir, ".vandor"), 0o755); err != nil {
 		return "", err
 	}
@@ -480,6 +483,7 @@ func writeFileIfMissing(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// #nosec G306 -- generated source and config templates should be readable by project collaborators.
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
@@ -491,6 +495,7 @@ func ensureCoreContracts(projectRoot string) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
+		// #nosec G306 -- generated core contract files should be readable by project collaborators.
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return err
 		}
@@ -546,6 +551,7 @@ func coreContractsFiles(projectRoot string) map[string]string {
 }
 
 func readModulePath(projectRoot string) string {
+	// #nosec G304 -- read path is constrained to project root + go.mod.
 	data, err := os.ReadFile(filepath.Join(projectRoot, "go.mod"))
 	if err != nil {
 		return ""

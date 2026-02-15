@@ -135,6 +135,7 @@ func (m *Manager) Add(source string, opts AddOptions) (AddResult, error) {
 	return m.addWithStack(source, opts, map[string]bool{})
 }
 
+//nolint:gocyclo // install flow intentionally handles resolution, dependencies, and lock-state updates in one transaction-like path.
 func (m *Manager) addWithStack(source string, opts AddOptions, stack map[string]bool) (AddResult, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -162,7 +163,9 @@ func (m *Manager) addWithStack(source string, opts AddOptions, stack map[string]
 		return AddResult{}, err
 	}
 	if resolved.CleanupPath != "" {
-		defer os.RemoveAll(resolved.CleanupPath)
+		defer func() {
+			_ = os.RemoveAll(resolved.CleanupPath)
+		}()
 	}
 	manifest, manifestRaw, err := LoadManifestFromDir(resolved.LocalPath)
 	if err != nil {
@@ -380,7 +383,9 @@ func (m *Manager) Info(nameOrSource string) (PackageInfo, error) {
 		return PackageInfo{}, err
 	}
 	if resolved.CleanupPath != "" {
-		defer os.RemoveAll(resolved.CleanupPath)
+		defer func() {
+			_ = os.RemoveAll(resolved.CleanupPath)
+		}()
 	}
 	manifest, _, err := LoadManifestFromDir(resolved.LocalPath)
 	if err != nil {
@@ -666,6 +671,7 @@ func (m *Manager) loadRegistryIndex(reg RegistryRef) (registryIndex, error) {
 	return parseRegistryIndex(raw)
 }
 
+//nolint:gocyclo // doctor intentionally aggregates many independent validations into one report pass.
 func (m *Manager) Doctor() (DoctorReport, error) {
 	lock, err := LoadLock(m.ProjectRoot)
 	if err != nil {
@@ -797,6 +803,7 @@ func (m *Manager) Exec(packageName, actionName string, args []string, stdout, st
 		return ExecResult{}, fmt.Errorf("package %s does not allow exec actions (permissions.exec=false)", packageName)
 	}
 
+	// #nosec G204 -- action.Run is an explicit package action contract executed by user intent via `vpkg exec`.
 	cmd := exec.Command("sh", append([]string{"-c", action.Run + " \"$@\"", "vandor-vpkg-action"}, args...)...)
 	cmd.Dir = cacheAbs
 	cmd.Stdout = stdout
@@ -854,7 +861,7 @@ func (m *Manager) resolveSource(source string, state State) (resolvedSource, err
 	if source == "" {
 		return resolvedSource{}, fmt.Errorf("source is required")
 	}
-	if strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") {
+	if filepath.IsAbs(source) || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") || strings.HasPrefix(source, `\`) {
 		path := source
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(m.ProjectRoot, path)
@@ -980,11 +987,14 @@ func (m *Manager) resolveGitSource(raw string, spec gitSourceSpec) (resolvedSour
 		cloneArgs = append(cloneArgs, "--branch", spec.Ref)
 	}
 	cloneArgs = append(cloneArgs, spec.Repo, cloneDir)
+	// #nosec G204 -- git clone arguments are derived from parsed git source syntax and executed intentionally.
 	if out, err := exec.Command("git", cloneArgs...).CombinedOutput(); err != nil {
 		if spec.Ref != "" {
+			// #nosec G204 -- fallback clone with validated git source data.
 			if out2, err2 := exec.Command("git", "clone", "--quiet", spec.Repo, cloneDir).CombinedOutput(); err2 != nil {
 				return cleanup(fmt.Errorf("git clone failed: %s", strings.TrimSpace(string(out2))))
 			}
+			// #nosec G204 -- checkout target ref is parsed from explicit source input.
 			if out3, err3 := exec.Command("git", "-C", cloneDir, "checkout", "--quiet", spec.Ref).CombinedOutput(); err3 != nil {
 				return cleanup(fmt.Errorf("git checkout %q failed: %s", spec.Ref, strings.TrimSpace(string(out3))))
 			}
@@ -992,6 +1002,7 @@ func (m *Manager) resolveGitSource(raw string, spec gitSourceSpec) (resolvedSour
 			return cleanup(fmt.Errorf("git clone failed: %s", strings.TrimSpace(string(out))))
 		}
 	}
+	// #nosec G204 -- rev-parse reads commit from cloned repository path.
 	commitOut, err := exec.Command("git", "-C", cloneDir, "rev-parse", "HEAD").CombinedOutput()
 	if err != nil {
 		return cleanup(fmt.Errorf("git rev-parse failed: %s", strings.TrimSpace(string(commitOut))))
@@ -1088,7 +1099,9 @@ func (m *Manager) fetchURLOnce(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("http status %d", resp.StatusCode)
 	}

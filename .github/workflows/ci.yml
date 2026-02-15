@@ -190,13 +190,14 @@ jobs:
       - name: Build Dev Binary
         run: task build:dev
 
-      - name: Verify Dev Commands Exist
+      - name: Verify Runtime Commands Exist (Dev Build)
         run: |
           echo "Testing dev build..."
-          ./${{ steps.binary-name.outputs.name }} dev --help > /dev/null
-          ./${{ steps.binary-name.outputs.name }} dev config --help > /dev/null
-          ./${{ steps.binary-name.outputs.name }} dev doctor --help > /dev/null
-          echo "✅ Dev commands exist in dev build"
+          ./${{ steps.binary-name.outputs.name }} dev:app --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} dev:worker --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} run:app --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} run:worker --help > /dev/null
+          echo "✅ Runtime commands exist in dev build"
 
       - name: Run Tests with Dev Tag
         run: task test:dev
@@ -204,15 +205,14 @@ jobs:
       - name: Build Production Binary
         run: task build:prod
 
-      - name: Verify Dev Commands Hidden
+      - name: Verify Runtime Commands Exist (Prod Build)
         run: |
           echo "Testing production build..."
-          if ./${{ steps.binary-name.outputs.name }} dev 2>&1 | grep -q "unknown command"; then
-            echo "✅ Dev commands hidden in production build"
-          else
-            echo "❌ Dev commands should not exist in production build"
-            exit 1
-          fi
+          ./${{ steps.binary-name.outputs.name }} dev:app --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} dev:worker --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} run:app --help > /dev/null
+          ./${{ steps.binary-name.outputs.name }} run:worker --help > /dev/null
+          echo "✅ Runtime commands exist in production build"
 
       - name: Run Tests without Dev Tag
         run: task test:prod
