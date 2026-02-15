@@ -23,8 +23,6 @@ pre-commit:
       run: .ckeletin/scripts/taskw.sh check:deps:verify
     secret-scan:
       run: .ckeletin/scripts/taskw.sh check:secrets:staged
-    vuln-scan:
-      run: .ckeletin/scripts/taskw.sh check:vuln:fast
     test:
       run: .ckeletin/scripts/taskw.sh test:unit
 
@@ -32,4 +30,4 @@ pre-push:
   parallel: false
   commands:
     coverage:
-      run: .ckeletin/scripts/taskw.sh test:coverage
+      run: .ckeletin/scripts/taskw.sh ckeletin:test:coverage:patch

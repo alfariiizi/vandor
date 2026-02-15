@@ -30,7 +30,7 @@ cp "$KEYS_FILE" "$TEMP_CURRENT"
 
 # Generate fresh constants to the actual file
 go run "$GEN_SCRIPT" > /dev/null 2>&1
-task ckeletin:format:staged -- "$KEYS_FILE" > /dev/null 2>&1
+"${SCRIPT_DIR}/taskw.sh" ckeletin:format:staged -- "$KEYS_FILE" > /dev/null 2>&1
 
 # Save freshly generated version
 cp "$KEYS_FILE" "$TEMP_FRESH"
