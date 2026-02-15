@@ -42,9 +42,6 @@ linters:
     - staticcheck   # Comprehensive static analysis
     - unused        # Unused code
 
-    # Security
-    - gosec         # Security problems
-
     # Bugs & Correctness
     - bodyclose     # Unclosed HTTP response bodies
     - nilerr        # Returns nil even when error is not nil
@@ -71,16 +68,13 @@ linters:
   # Disabled temporarily - too noisy for initial v2 adoption
   # Re-enable after addressing style issues incrementally
   disable:
+    - gosec         # Temporarily disabled: high false-positive rate for scaffolder/vpkg filesystem workflows
     - gocritic      # Style and performance suggestions
     - revive        # General purpose style linter
 
 linters-settings:
   gocyclo:
     min-complexity: 15
-
-  gosec:
-    excludes:
-      - G104  # Duplicates errcheck
 
   revive:
     enable-all-rules: false
