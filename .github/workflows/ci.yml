@@ -33,12 +33,18 @@ jobs:
   # Only runs on main branch pushes and releases (expensive runners)
   test-matrix:
     name: Test on ${{ matrix.os }}
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (matrix.run_on_main || startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            run_on_main: true
+          - os: macos-latest
+            run_on_main: false
+          - os: windows-latest
+            run_on_main: false
 
     permissions:
       contents: read
@@ -66,63 +72,16 @@ jobs:
       - name: Download Dependencies
         run: go mod download
 
-      - name: Install Task (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          INSTALL_DIR="$HOME/.local/bin"
-          mkdir -p "$INSTALL_DIR"
-          curl -sL https://taskfile.dev/install.sh | sh -s -- -b "$INSTALL_DIR" v${{ env.TASK_VERSION }}
-          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-        shell: bash
-
-      - name: Install Task (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          $INSTALL_DIR = "$env:USERPROFILE\.local\bin"
-          New-Item -ItemType Directory -Force -Path $INSTALL_DIR
-          $TASK_URL = "https://github.com/go-task/task/releases/download/v${{ env.TASK_VERSION }}/task_windows_amd64.zip"
-          Invoke-WebRequest -Uri $TASK_URL -OutFile task.zip
-          Expand-Archive -Path task.zip -DestinationPath $INSTALL_DIR -Force
-          Remove-Item task.zip
-          echo "$INSTALL_DIR" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        shell: pwsh
-
-      - name: Verify Task Installation
-        run: task --version
-
-      - name: Cache Dev Tools (pinned versions)
-        id: cache-devtools
-        uses: actions/cache@v5
-        with:
-          path: ~/go/bin
-          key: ${{ runner.os }}-devtools-${{ hashFiles('.go-version') }}-${{ env.PINNED_TOOLS_VERSION }}
-
-      - name: Add Go bin to PATH (Unix)
-        if: runner.os != 'Windows'
-        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-      - name: Add Go bin to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: echo "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        shell: pwsh
-
-      - name: Install Pinned Tools
-        if: steps.cache-devtools.outputs.cache-hit != 'true'
-        run: task setup:pinned
-
-      - name: Install Latest Tools (always fresh)
-        run: task setup:latest
-
-      - name: Build
-        run: task build
+      - name: Build (dev tag)
+        run: go build -tags dev ./...
 
       - name: Run Tests with Race Detection (Unix)
         if: runner.os != 'Windows'
-        run: task test:race
+        run: go test -race ./...
 
       - name: Run Tests (Windows - no race detector)
         if: runner.os == 'Windows'
-        run: task test
+        run: go test ./...
 
   # Test dev vs prod builds to ensure build tags work correctly
   # Only runs on main branch pushes and releases (not needed for every PR)
@@ -156,30 +115,6 @@ jobs:
       - name: Download Dependencies
         run: go mod download
 
-      - name: Install Task
-        run: |
-          INSTALL_DIR="$HOME/.local/bin"
-          mkdir -p "$INSTALL_DIR"
-          curl -sL https://taskfile.dev/install.sh | sh -s -- -b "$INSTALL_DIR" v${{ env.TASK_VERSION }}
-          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-
-      - name: Cache Dev Tools (pinned versions)
-        id: cache-devtools
-        uses: actions/cache@v5
-        with:
-          path: ~/go/bin
-          key: ${{ runner.os }}-devtools-${{ hashFiles('.go-version') }}-${{ env.PINNED_TOOLS_VERSION }}
-
-      - name: Add Go bin to PATH
-        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-      - name: Install Pinned Tools
-        if: steps.cache-devtools.outputs.cache-hit != 'true'
-        run: task setup:pinned
-
-      - name: Install Latest Tools (always fresh)
-        run: task setup:latest
-
       - name: Get Binary Name from SSOT
         id: binary-name
         run: |
@@ -188,7 +123,7 @@ jobs:
           echo "Binary name: $BINARY_NAME"
 
       - name: Build Dev Binary
-        run: task build:dev
+        run: go build -tags dev -o "${{ steps.binary-name.outputs.name }}" ./main.go
 
       - name: Verify Runtime Commands Exist (Dev Build)
         run: |
@@ -200,10 +135,10 @@ jobs:
           echo "✅ Runtime commands exist in dev build"
 
       - name: Run Tests with Dev Tag
-        run: task test:dev
+        run: go test -tags dev ./...
 
       - name: Build Production Binary
-        run: task build:prod
+        run: go build -o "${{ steps.binary-name.outputs.name }}" ./main.go
 
       - name: Verify Runtime Commands Exist (Prod Build)
         run: |
@@ -215,7 +150,7 @@ jobs:
           echo "✅ Runtime commands exist in production build"
 
       - name: Run Tests without Dev Tag
-        run: task test:prod
+        run: go test ./...
 
   # Main build job with quality checks (Linux only)
   # PRs: Fast checks (format, lint, validate, unit tests) - ~2-3 min

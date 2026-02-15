@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +20,7 @@ var (
 	noInputMode      bool
 	assumeYes        bool
 	outputMode       string
+	configFilePath   string
 )
 
 var RootCmd = &cobra.Command{
@@ -35,6 +37,9 @@ hexagonal architecture + DDD boundaries and vpkg-based transport/infrastructure 
 		}
 		if outputMode != "text" && outputMode != "json" {
 			return fmt.Errorf("invalid --output %q, allowed values: text, json", outputMode)
+		}
+		if err := validateConfigFileSecurity(cmd); err != nil {
+			return err
 		}
 		return nil
 	},
@@ -72,4 +77,18 @@ func init() {
 	RootCmd.PersistentFlags().BoolVar(&noInputMode, "no-input", false, "Disable prompts and fail fast on missing args")
 	RootCmd.PersistentFlags().BoolVar(&assumeYes, "yes", false, "Skip confirmation prompts")
 	RootCmd.PersistentFlags().StringVar(&outputMode, "output", "text", "Output mode: text|json")
+	RootCmd.PersistentFlags().StringVar(&configFilePath, "config", "", "Path to config file (validated when provided)")
+}
+
+func validateConfigFileSecurity(cmd *cobra.Command) error {
+	if !cmd.Flags().Changed("config") {
+		return nil
+	}
+	if configFilePath == "" {
+		return nil
+	}
+	if err := config.ValidateConfigFileSecurity(configFilePath, config.MaxConfigFileSize); err != nil {
+		return fmt.Errorf("config security validation failed: %w", err)
+	}
+	return nil
 }
