@@ -1,5 +1,7 @@
 package cmd
 
+// ckeletin:allow-custom-command
+
 import (
 	"fmt"
 	"os/exec"
