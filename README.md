@@ -8,6 +8,52 @@ Vandor is a Golang CLI for building backend projects with:
 
 This repository is the CLI core only.
 
+## Installation
+
+### Linux/macOS/WSL (recommended)
+
+Install latest release binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alfariiizi/vandor/main/scripts/install.sh | sh
+```
+
+Install specific version:
+
+```bash
+VANDOR_VERSION=v0.4.0 curl -fsSL https://raw.githubusercontent.com/alfariiizi/vandor/main/scripts/install.sh | sh
+```
+
+Notes:
+
+1. Script installs to `/usr/local/bin` when writable, otherwise `~/.local/bin`.
+2. Script does not force-write your shell profile.
+3. Optional registry env:
+   - `export VANDOR_VPKG_REGISTRY_OFFICIAL=https://vpkg.vercel.app`
+
+### Windows (native, safe/manual)
+
+Option A: Manual (safest)
+
+1. Download `vandor_<version>_windows_amd64.zip` from GitHub Releases.
+2. Extract `vandor.exe` to a stable folder (example: `C:\Tools\vandor\`).
+3. Add that folder to User PATH manually from Windows Environment Variables.
+4. Open new terminal and run `vandor --version`.
+
+Option B: PowerShell installer script (PATH not changed by default)
+
+```powershell
+iwr https://raw.githubusercontent.com/alfariiizi/vandor/main/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Optional:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -AddToPath
+setx VANDOR_VPKG_REGISTRY_OFFICIAL "https://vpkg.vercel.app"
+```
+
 ## Project Status
 
 This codebase is under active refactoring toward Vandor v0.4.
@@ -43,7 +89,7 @@ Phase-1 available now:
 5. `vandor add usecase <context> <name>`
 6. `vandor add service <context> <name>`
 7. `vandor sync core|context|all`
-8. `vandor vpkg add|remove|list|search|sync|doctor|exec|exec-alias`
+8. `vandor vpkg add|remove|list|search|sync|info|doctor|exec|exec-alias`
 9. `vandor vpkg registry add|list|remove`
 10. `vandor run:app|run:worker`
 11. `vandor dev:app|dev:worker`
@@ -64,6 +110,7 @@ Notes:
    - `verified`
    - `community`
    (with env override support via `VANDOR_VPKG_REGISTRY_OFFICIAL|VERIFIED|COMMUNITY`)
+   - default remote endpoint: `https://vpkg.vercel.app`
 5. `vandor vpkg add --plan` provides dry-run install plan without writing files.
 6. `vandor vpkg add` auto-installs dependency chain from package manifest.
 7. In interactive mode (`-it`), `vpkg add` asks confirmation before applying write operations.
@@ -71,6 +118,7 @@ Notes:
 9. `vandor vpkg remove` now blocks removing a package that is still required by others, unless `--force` is used.
 10. Alias shortcut is supported: unknown command with `:` will fallback to installed vpkg alias (for example `vandor add:http-handler`).
 11. `vandor vpkg search` supports pagination with `--limit` (default `10`) and `--offset`.
+12. `vandor vpkg info <package-or-source>` prints action/alias usage and README path (when available).
 
 ## Architecture Boundary
 

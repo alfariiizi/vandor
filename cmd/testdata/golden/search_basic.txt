@@ -1,0 +1,2 @@
+Available vpkg packages (showing 1 of 1):
+- official/infra-hello@0.1.0 [official] registry=official metadata=packages/official/infra-hello.json

@@ -92,8 +92,12 @@ func TestVpkgDoctorDetectsDrift(t *testing.T) {
 	if err := os.WriteFile(targetFile, []byte("drifted"), 0o644); err != nil {
 		t.Fatalf("write drift file: %v", err)
 	}
-	if _, err := runRootForTest("vpkg", "doctor", "--path", projectRoot); err == nil {
+	out, err := runRootForTest("vpkg", "doctor", "--path", projectRoot)
+	if err == nil {
 		t.Fatalf("expected doctor to fail on drift")
+	}
+	if !strings.Contains(out, "OWNERSHIP_FILE_HASH_MISMATCH") {
+		t.Fatalf("expected doctor issue code in output, got: %s", out)
 	}
 }
 
@@ -220,6 +224,9 @@ func TestVpkgSearch(t *testing.T) {
 	if !strings.Contains(out, "official/infra-hello@0.1.0") {
 		t.Fatalf("expected package in search output:\n%s", out)
 	}
+	if !strings.Contains(out, "metadata=packages/official/infra-hello.json") {
+		t.Fatalf("expected metadata in search output:\n%s", out)
+	}
 	if !strings.Contains(out, "showing 1 of 1") {
 		t.Fatalf("expected search summary output, got:\n%s", out)
 	}
@@ -246,6 +253,68 @@ func TestVpkgSearch(t *testing.T) {
 	}
 	if !strings.Contains(out, "No vpkg packages found") {
 		t.Fatalf("unexpected tier-filtered search output:\n%s", out)
+	}
+
+	out, err = runRootForTest("vpkg", "search", "hello", "--registry", "official", "--path", projectRoot)
+	if err != nil {
+		t.Fatalf("vpkg search --registry failed: %v\nout=%s", err, out)
+	}
+	if !strings.Contains(out, "official/infra-hello@0.1.0") {
+		t.Fatalf("unexpected registry-filtered search output:\n%s", out)
+	}
+
+	out, err = runRootForTest("vpkg", "search", "hello", "--registry", "does-not-exist", "--path", projectRoot)
+	if err == nil {
+		t.Fatalf("expected unknown registry to fail; out=%s", out)
+	}
+	if !strings.Contains(out, "registry \"does-not-exist\" not found") {
+		t.Fatalf("unexpected unknown registry error output:\n%s", out)
+	}
+}
+
+func TestVpkgInfo(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := runRootForTest("new", "info_app", "--path", tmp, "--tidy", "never"); err != nil {
+		t.Fatalf("new command failed: %v", err)
+	}
+	projectRoot := filepath.Join(tmp, "info_app")
+	pkgPath := createLocalTestPackage(t)
+	registryRoot := createLocalRegistryIndexForPackage(t, "infra-hello", pkgPath)
+	if _, err := runRootForTest("vpkg", "registry", "add", "official", registryRoot, "--path", projectRoot); err != nil {
+		t.Fatalf("vpkg registry add failed: %v", err)
+	}
+
+	out, err := runRootForTest("vpkg", "info", "official/infra-hello", "--path", projectRoot)
+	if err != nil {
+		t.Fatalf("vpkg info before install failed: %v\nout=%s", err, out)
+	}
+	if !strings.Contains(out, "- installed: false") {
+		t.Fatalf("expected info output to show not installed:\n%s", out)
+	}
+	if !strings.Contains(out, "Install:") || !strings.Contains(out, "vandor vpkg add official/infra-hello") {
+		t.Fatalf("expected install hint in info output:\n%s", out)
+	}
+
+	out, err = runRootForTest("vpkg", "add", "official/infra-hello", "--path", projectRoot)
+	if err != nil {
+		t.Fatalf("vpkg add failed: %v\nout=%s", err, out)
+	}
+	if !strings.Contains(out, "Next steps:") || !strings.Contains(out, "vandor vpkg info official/infra-hello") {
+		t.Fatalf("expected add output next-step hint:\n%s", out)
+	}
+
+	out, err = runRootForTest("vpkg", "info", "official/infra-hello", "--path", projectRoot)
+	if err != nil {
+		t.Fatalf("vpkg info after install failed: %v\nout=%s", err, out)
+	}
+	if !strings.Contains(out, "- installed: true") {
+		t.Fatalf("expected info output to show installed:\n%s", out)
+	}
+	if !strings.Contains(out, "Actions:") || !strings.Contains(out, "vandor vpkg exec official/infra-hello say-hello") {
+		t.Fatalf("expected actions usage in info output:\n%s", out)
+	}
+	if !strings.Contains(out, "Aliases:") || !strings.Contains(out, "vandor add:hello") {
+		t.Fatalf("expected aliases usage in info output:\n%s", out)
 	}
 }
 
@@ -318,6 +387,9 @@ func TestVpkgAutoInstallDependencies(t *testing.T) {
 	out, err = runRootForTest("vpkg", "remove", "official/infra-dep", "--force", "--path", projectRoot)
 	if err != nil {
 		t.Fatalf("force remove dependency package should succeed: %v\nout=%s", err, out)
+	}
+	if !strings.Contains(out, "Force remove preview for official/infra-dep") {
+		t.Fatalf("expected force remove preview output, got: %s", out)
 	}
 }
 

@@ -4,7 +4,7 @@ version: '3'
 
 vars:
   # Project configuration - customize these for your CLI
-  BINARY_NAME: ckeletin-go
+  BINARY_NAME: vandor
   MODULE_PATH:
     sh: go list -m
 

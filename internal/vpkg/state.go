@@ -17,7 +17,7 @@ const (
 	lockFileName  = "vpkg.lock"
 	lockVersion   = 1
 
-	defaultRegistryBaseURL = "https://raw.githubusercontent.com/alfariiizi/vpkg/main"
+	defaultRegistryBaseURL = "https://vpkg.vercel.app"
 
 	envRegistryOfficial  = "VANDOR_VPKG_REGISTRY_OFFICIAL"
 	envRegistryVerified  = "VANDOR_VPKG_REGISTRY_VERIFIED"

@@ -12,12 +12,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
+const (
+	defaultHTTPTimeout = 4 * time.Second
+	defaultHTTPRetries = 1
+)
+
 type Manager struct {
 	ProjectRoot string
+	HTTPTimeout time.Duration
+	HTTPRetries int
 }
 
 type AddOptions struct {
@@ -54,6 +62,27 @@ type RemoveResult struct {
 	DriftedFiles int    `json:"drifted_files"`
 }
 
+type RemovePreview struct {
+	Name              string   `json:"name"`
+	DependentPackages []string `json:"dependent_packages,omitempty"`
+	OwnedFiles        int      `json:"owned_files"`
+	SampleFiles       []string `json:"sample_files,omitempty"`
+}
+
+type PackageInfo struct {
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Tier         string   `json:"tier"`
+	Kind         string   `json:"kind"`
+	Source       string   `json:"source"`
+	Installed    bool     `json:"installed"`
+	Description  string   `json:"description,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Actions      []Action `json:"actions,omitempty"`
+	Aliases      []Alias  `json:"aliases,omitempty"`
+	ReadmePath   string   `json:"readme_path,omitempty"`
+}
+
 type SyncResult struct {
 	Packages int `json:"packages"`
 	Files    int `json:"files"`
@@ -68,6 +97,7 @@ type DoctorIssue struct {
 	Severity string `json:"severity"`
 	Package  string `json:"package"`
 	Check    string `json:"check"`
+	Code     string `json:"code"`
 	Message  string `json:"message"`
 }
 
@@ -89,7 +119,16 @@ type resolvedSource struct {
 }
 
 func NewManager(projectRoot string) *Manager {
-	return &Manager{ProjectRoot: projectRoot}
+	timeout := parseDurationEnv("VANDOR_VPKG_HTTP_TIMEOUT", defaultHTTPTimeout)
+	retries := parseIntEnv("VANDOR_VPKG_HTTP_RETRIES", defaultHTTPRetries)
+	if retries < 0 {
+		retries = 0
+	}
+	return &Manager{
+		ProjectRoot: projectRoot,
+		HTTPTimeout: timeout,
+		HTTPRetries: retries,
+	}
 }
 
 func (m *Manager) Add(source string, opts AddOptions) (AddResult, error) {
@@ -289,6 +328,91 @@ func (m *Manager) Remove(nameOrSource string, opts RemoveOptions) (RemoveResult,
 	}, nil
 }
 
+func (m *Manager) PreviewRemove(nameOrSource string) (RemovePreview, error) {
+	lock, err := LoadLock(m.ProjectRoot)
+	if err != nil {
+		return RemovePreview{}, err
+	}
+	pkg, ok := findLockedPackageByNameOrSource(lock, nameOrSource)
+	if !ok {
+		return RemovePreview{}, fmt.Errorf("package %q is not installed", nameOrSource)
+	}
+	dependents, err := m.findDependentPackages(lock, pkg)
+	if err != nil {
+		return RemovePreview{}, err
+	}
+	sampleLimit := 5
+	sample := make([]string, 0, sampleLimit)
+	for _, owned := range pkg.Ownership.Files {
+		sample = append(sample, owned.Path)
+		if len(sample) == sampleLimit {
+			break
+		}
+	}
+	return RemovePreview{
+		Name:              pkg.Name,
+		DependentPackages: dependents,
+		OwnedFiles:        len(pkg.Ownership.Files),
+		SampleFiles:       sample,
+	}, nil
+}
+
+func (m *Manager) Info(nameOrSource string) (PackageInfo, error) {
+	lock, err := LoadLock(m.ProjectRoot)
+	if err != nil {
+		return PackageInfo{}, err
+	}
+	if pkg, ok := findLockedPackageByNameOrSource(lock, nameOrSource); ok {
+		cacheAbs := m.resolveCachePath(pkg.Resolved.CachePath)
+		manifest, _, err := LoadManifestFromDir(cacheAbs)
+		if err != nil {
+			return PackageInfo{}, fmt.Errorf("load installed package manifest: %w", err)
+		}
+		return m.packageInfoFromManifest(manifest, pkg.Source, true, cacheAbs), nil
+	}
+
+	state, err := LoadState(m.ProjectRoot)
+	if err != nil {
+		return PackageInfo{}, err
+	}
+	resolved, err := m.resolveSource(nameOrSource, state)
+	if err != nil {
+		return PackageInfo{}, err
+	}
+	if resolved.CleanupPath != "" {
+		defer os.RemoveAll(resolved.CleanupPath)
+	}
+	manifest, _, err := LoadManifestFromDir(resolved.LocalPath)
+	if err != nil {
+		return PackageInfo{}, err
+	}
+	return m.packageInfoFromManifest(manifest, nameOrSource, false, resolved.LocalPath), nil
+}
+
+func (m *Manager) packageInfoFromManifest(manifest Manifest, source string, installed bool, packageRoot string) PackageInfo {
+	info := PackageInfo{
+		Name:         manifest.Name,
+		Version:      manifest.Version,
+		Tier:         manifest.Tier,
+		Kind:         manifest.Kind,
+		Source:       source,
+		Installed:    installed,
+		Description:  strings.TrimSpace(manifest.Description),
+		Capabilities: append([]string(nil), manifest.Capabilities...),
+		Actions:      append([]Action(nil), manifest.Actions...),
+		Aliases:      append([]Alias(nil), manifest.Aliases...),
+	}
+	readmePath := filepath.Join(packageRoot, "README.md")
+	if _, err := os.Stat(readmePath); err == nil {
+		if rel, relErr := makeRelative(m.ProjectRoot, readmePath); relErr == nil && !strings.HasPrefix(rel, "../") {
+			info.ReadmePath = rel
+		} else {
+			info.ReadmePath = filepath.ToSlash(readmePath)
+		}
+	}
+	return info
+}
+
 func (m *Manager) findDependentPackages(lock Lock, target LockedPackage) ([]string, error) {
 	dependents := make([]string, 0)
 	for _, candidate := range lock.Packages {
@@ -394,15 +518,21 @@ func (m *Manager) RegistryRemove(name string) (RegistryRef, error) {
 	return removed, nil
 }
 
-func (m *Manager) Search(query, tier string) ([]SearchPackage, error) {
+func (m *Manager) Search(query, tier, registry string) ([]SearchPackage, error) {
 	state, err := LoadState(m.ProjectRoot)
 	if err != nil {
 		return nil, err
 	}
 	query = strings.ToLower(strings.TrimSpace(query))
 	tier = strings.ToLower(strings.TrimSpace(tier))
+	registry = strings.TrimSpace(registry)
 	if tier != "" && tier != TierOfficial && tier != TierVerified && tier != TierCommunity {
 		return nil, fmt.Errorf("invalid tier %q (allowed: official|verified|community)", tier)
+	}
+	if registry != "" {
+		if _, ok := findRegistry(state, registry); !ok {
+			return nil, fmt.Errorf("registry %q not found", registry)
+		}
 	}
 
 	registries := append([]RegistryRef(nil), state.Registries...)
@@ -418,6 +548,9 @@ func (m *Manager) Search(query, tier string) ([]SearchPackage, error) {
 	found := make(map[string]SearchPackage)
 	var failed int
 	for _, reg := range registries {
+		if registry != "" && reg.Name != registry {
+			continue
+		}
 		index, idxErr := m.loadRegistryIndex(reg)
 		if idxErr != nil {
 			failed++
@@ -525,21 +658,8 @@ func (m *Manager) loadRegistryIndex(reg RegistryRef) (registryIndex, error) {
 		return parseRegistryIndex(raw)
 	}
 
-	client := &http.Client{Timeout: 4 * time.Second}
 	endpoint := strings.TrimRight(reg.URL, "/") + "/index.json"
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
-	if err != nil {
-		return registryIndex{}, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return registryIndex{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return registryIndex{}, fmt.Errorf("registry %s returned status %d", reg.Name, resp.StatusCode)
-	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := m.fetchURL(endpoint)
 	if err != nil {
 		return registryIndex{}, err
 	}
@@ -557,83 +677,83 @@ func (m *Manager) Doctor() (DoctorReport, error) {
 		cacheAbs := m.resolveCachePath(pkg.Resolved.CachePath)
 		manifest, manifestRaw, err := LoadManifestFromDir(cacheAbs)
 		if err != nil {
-			report.add("error", pkg.Name, "cache", fmt.Sprintf("invalid cache/manifest: %v", err))
+			report.add("error", pkg.Name, "cache", "CACHE_MANIFEST_INVALID", fmt.Sprintf("invalid cache/manifest: %v", err))
 			continue
 		}
 		if manifest.Name != pkg.Name {
-			report.add("error", pkg.Name, "manifest", "manifest name mismatch with lock")
+			report.add("error", pkg.Name, "manifest", "MANIFEST_NAME_MISMATCH", "manifest name mismatch with lock")
 		}
 		if manifest.Version != pkg.Version {
-			report.add("error", pkg.Name, "manifest", "manifest version mismatch with lock")
+			report.add("error", pkg.Name, "manifest", "MANIFEST_VERSION_MISMATCH", "manifest version mismatch with lock")
 		}
 		if len(manifest.Actions) > 0 && !manifest.Permissions.Exec {
-			report.add("warn", pkg.Name, "action", "manifest declares actions but permissions.exec=false")
+			report.add("warn", pkg.Name, "action", "ACTION_EXEC_DISABLED", "manifest declares actions but permissions.exec=false")
 		}
 		for _, dep := range manifest.Dependencies {
 			depSource := strings.TrimSpace(dep.Source)
 			if depSource == "" {
-				report.add("error", pkg.Name, "dependency", "dependency has empty source")
+				report.add("error", pkg.Name, "dependency", "DEP_EMPTY_SOURCE", "dependency has empty source")
 				continue
 			}
 			if depSource == pkg.Name || depSource == pkg.Source {
-				report.add("error", pkg.Name, "dependency", fmt.Sprintf("self dependency is not allowed: %s", depSource))
+				report.add("error", pkg.Name, "dependency", "DEP_SELF_REFERENCE", fmt.Sprintf("self dependency is not allowed: %s", depSource))
 				continue
 			}
 			if !dependencyInstalled(lock, depSource) {
-				report.add("error", pkg.Name, "dependency", fmt.Sprintf("missing dependency: %s", depSource))
+				report.add("error", pkg.Name, "dependency", "DEP_MISSING", fmt.Sprintf("missing dependency: %s", depSource))
 			}
 		}
 		for _, issue := range compareActionContract(pkg.Actions, manifest.Actions) {
-			report.add("error", pkg.Name, "action", issue)
+			report.add("error", pkg.Name, "action", "ACTION_CONTRACT_MISMATCH", issue)
 		}
 		for _, issue := range compareAliasContract(pkg.Aliases, manifest.Aliases) {
-			report.add("error", pkg.Name, "alias", issue)
+			report.add("error", pkg.Name, "alias", "ALIAS_CONTRACT_MISMATCH", issue)
 		}
 		manifestActionSet := actionNameSet(manifest.Actions)
 		for _, alias := range manifest.Aliases {
 			if isReservedAlias(alias.Name) {
-				report.add("error", pkg.Name, "alias", fmt.Sprintf("manifest declares reserved alias: %s", alias.Name))
+				report.add("error", pkg.Name, "alias", "ALIAS_RESERVED", fmt.Sprintf("manifest declares reserved alias: %s", alias.Name))
 			}
 			if strings.Contains(alias.Action, ":") {
 				continue
 			}
 			if _, ok := manifestActionSet[alias.Action]; !ok {
-				report.add("error", pkg.Name, "alias", fmt.Sprintf("manifest alias %q points to unknown action %q", alias.Name, alias.Action))
+				report.add("error", pkg.Name, "alias", "ALIAS_UNKNOWN_ACTION", fmt.Sprintf("manifest alias %q points to unknown action %q", alias.Name, alias.Action))
 			}
 		}
 		if !equalStringSlices(sortedCopy(pkg.Ownership.Aliases), aliasNames(manifest.Aliases)) {
-			report.add("warn", pkg.Name, "ownership", "owned alias list mismatch with manifest aliases")
+			report.add("warn", pkg.Name, "ownership", "OWNERSHIP_ALIAS_MISMATCH", "owned alias list mismatch with manifest aliases")
 		}
 		if sha256Hex(manifestRaw) != pkg.Integrity.ManifestSHA256 {
-			report.add("error", pkg.Name, "integrity", "manifest hash mismatch")
+			report.add("error", pkg.Name, "integrity", "INTEGRITY_MANIFEST_HASH_MISMATCH", "manifest hash mismatch")
 		}
 		contentHash, err := treeSHA256(cacheAbs)
 		if err != nil {
-			report.add("error", pkg.Name, "integrity", fmt.Sprintf("cannot hash cache: %v", err))
+			report.add("error", pkg.Name, "integrity", "INTEGRITY_CONTENT_HASH_ERROR", fmt.Sprintf("cannot hash cache: %v", err))
 		} else if contentHash != pkg.Integrity.ContentSHA256 {
-			report.add("error", pkg.Name, "integrity", "content hash mismatch")
+			report.add("error", pkg.Name, "integrity", "INTEGRITY_CONTENT_HASH_MISMATCH", "content hash mismatch")
 		}
 		for _, owned := range pkg.Ownership.Files {
 			abs := filepath.Join(m.ProjectRoot, filepath.FromSlash(owned.Path))
 			sum, err := fileSHA256(abs)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					report.add("warn", pkg.Name, "ownership", fmt.Sprintf("missing file: %s", owned.Path))
+					report.add("warn", pkg.Name, "ownership", "OWNERSHIP_FILE_MISSING", fmt.Sprintf("missing file: %s", owned.Path))
 					continue
 				}
-				report.add("error", pkg.Name, "ownership", fmt.Sprintf("cannot read %s: %v", owned.Path, err))
+				report.add("error", pkg.Name, "ownership", "OWNERSHIP_FILE_READ_ERROR", fmt.Sprintf("cannot read %s: %v", owned.Path, err))
 				continue
 			}
 			if sum != owned.SHA256 {
-				report.add("warn", pkg.Name, "ownership", fmt.Sprintf("drifted file: %s", owned.Path))
+				report.add("warn", pkg.Name, "ownership", "OWNERSHIP_FILE_HASH_MISMATCH", fmt.Sprintf("drifted file: %s", owned.Path))
 			}
 		}
 		for _, alias := range pkg.Aliases {
 			if isReservedAlias(alias.Name) {
-				report.add("error", pkg.Name, "alias", fmt.Sprintf("reserved alias: %s", alias.Name))
+				report.add("error", pkg.Name, "alias", "ALIAS_RESERVED", fmt.Sprintf("reserved alias: %s", alias.Name))
 			}
 			if owner, exists := aliasOwners[alias.Name]; exists && owner != pkg.Name {
-				report.add("error", pkg.Name, "alias", fmt.Sprintf("alias collision with %s: %s", owner, alias.Name))
+				report.add("error", pkg.Name, "alias", "ALIAS_COLLISION", fmt.Sprintf("alias collision with %s: %s", owner, alias.Name))
 			}
 			aliasOwners[alias.Name] = pkg.Name
 		}
@@ -923,21 +1043,8 @@ func (m *Manager) resolveRegistryIndexSource(reg RegistryRef, regName, pkgName, 
 		fmt.Sprintf("%s/packages/%s.json", baseURL, pkgName),
 	}
 	for _, endpoint := range candidates {
-		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		raw, err := m.fetchURL(endpoint)
 		if err != nil {
-			continue
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			continue
-		}
-		raw, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
 			continue
 		}
 		source, parseErr := parseRegistryPackageSource(raw, version)
@@ -947,6 +1054,49 @@ func (m *Manager) resolveRegistryIndexSource(reg RegistryRef, regName, pkgName, 
 		return normalizeRegistrySourceURL(baseURL, source), nil
 	}
 	return "", fmt.Errorf("registry index not found")
+}
+
+func (m *Manager) fetchURL(url string) ([]byte, error) {
+	var lastErr error
+	attempts := m.HTTPRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		raw, err := m.fetchURLOnce(url)
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+		if attempt < attempts-1 {
+			time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("request failed")
+	}
+	return nil, lastErr
+}
+
+func (m *Manager) fetchURLOnce(url string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: m.HTTPTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 type registryPackageVersion struct {
@@ -1481,12 +1631,13 @@ func (m *Manager) validateAliasConflicts(lock Lock, manifest Manifest) error {
 	return nil
 }
 
-func (r *DoctorReport) add(severity, pkg, check, message string) {
+func (r *DoctorReport) add(severity, pkg, check, code, message string) {
 	r.Healthy = false
 	r.Issues = append(r.Issues, DoctorIssue{
 		Severity: severity,
 		Package:  pkg,
 		Check:    check,
+		Code:     code,
 		Message:  message,
 	})
 }
@@ -1801,6 +1952,32 @@ func isReservedAlias(name string) bool {
 		return true
 	}
 	return strings.HasPrefix(name, "run:") || strings.HasPrefix(name, "dev:")
+}
+
+func parseDurationEnv(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	return fallback
+}
+
+func parseIntEnv(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func matchTargetPattern(rel, pattern string) bool {

@@ -53,7 +53,24 @@ var vpkgAddCmd = &cobra.Command{
 		if outputMode == "text" && !previewMode && !assumeYes && len(result.Plan) > 0 {
 			printPlan(cmd, result.Plan)
 		}
-		return emitResult(cmd, fmt.Sprintf("Installed package %s@%s", result.Name, result.Version), result)
+		message := fmt.Sprintf("Installed package %s@%s", result.Name, result.Version)
+		nextStep := fmt.Sprintf("vandor vpkg info %s", result.Name)
+		payload := map[string]any{
+			"name":       result.Name,
+			"version":    result.Version,
+			"tier":       result.Tier,
+			"kind":       result.Kind,
+			"source":     result.Source,
+			"files":      result.Files,
+			"cache_path": result.CachePath,
+			"next_steps": []string{
+				nextStep,
+			},
+		}
+		if outputMode == "text" {
+			message = message + "\nNext steps:\n- " + nextStep
+		}
+		return emitResult(cmd, message, payload)
 	},
 }
 
@@ -71,11 +88,29 @@ var vpkgRemoveCmd = &cobra.Command{
 			return err
 		}
 		manager := vpkg.NewManager(root)
+		var preview vpkg.RemovePreview
+		if vpkgRemoveForce {
+			preview, err = manager.PreviewRemove(args[0])
+			if err != nil {
+				return err
+			}
+			if outputMode == "text" {
+				printRemovePreview(cmd, preview)
+			}
+		}
 		result, err := manager.Remove(args[0], vpkg.RemoveOptions{Force: vpkgRemoveForce})
 		if err != nil {
 			return err
 		}
-		return emitResult(cmd, fmt.Sprintf("Removed package %s", result.Name), result)
+		payload := map[string]any{
+			"name":          result.Name,
+			"removed_files": result.RemovedFiles,
+			"drifted_files": result.DriftedFiles,
+		}
+		if vpkgRemoveForce {
+			payload["preview"] = preview
+		}
+		return emitResult(cmd, fmt.Sprintf("Removed package %s", result.Name), payload)
 	},
 }
 
@@ -114,6 +149,7 @@ var vpkgListCmd = &cobra.Command{
 }
 
 var vpkgSearchTier string
+var vpkgSearchRegistry string
 var vpkgSearchLimit int
 var vpkgSearchOffset int
 var vpkgDoctorFix bool
@@ -132,7 +168,7 @@ var vpkgSearchCmd = &cobra.Command{
 		if len(args) > 0 {
 			query = args[0]
 		}
-		items, err := manager.Search(query, vpkgSearchTier)
+		items, err := manager.Search(query, vpkgSearchTier, vpkgSearchRegistry)
 		if err != nil {
 			return err
 		}
@@ -147,24 +183,30 @@ var vpkgSearchCmd = &cobra.Command{
 				"total":    total,
 				"query":    query,
 				"tier":     vpkgSearchTier,
+				"registry": vpkgSearchRegistry,
 				"offset":   vpkgSearchOffset,
 				"limit":    vpkgSearchLimit,
 			})
 		}
 		if len(pagedItems) == 0 {
 			return emitResult(cmd, "No vpkg packages found", map[string]any{
-				"count":  0,
-				"total":  total,
-				"query":  query,
-				"tier":   vpkgSearchTier,
-				"offset": vpkgSearchOffset,
-				"limit":  vpkgSearchLimit,
+				"count":    0,
+				"total":    total,
+				"query":    query,
+				"tier":     vpkgSearchTier,
+				"registry": vpkgSearchRegistry,
+				"offset":   vpkgSearchOffset,
+				"limit":    vpkgSearchLimit,
 			})
 		}
 		lines := make([]string, 0, len(pagedItems)+2)
 		lines = append(lines, fmt.Sprintf("Available vpkg packages (showing %d of %d):", len(pagedItems), total))
 		for _, item := range pagedItems {
-			lines = append(lines, fmt.Sprintf("- %s@%s [%s] registry=%s", item.Name, item.Latest, item.Tier, item.Registry))
+			line := fmt.Sprintf("- %s@%s [%s] registry=%s", item.Name, item.Latest, item.Tier, item.Registry)
+			if item.Metadata != "" {
+				line += fmt.Sprintf(" metadata=%s", item.Metadata)
+			}
+			lines = append(lines, line)
 		}
 		return emitResult(cmd, strings.Join(lines, "\n"), map[string]any{
 			"packages": pagedItems,
@@ -172,6 +214,7 @@ var vpkgSearchCmd = &cobra.Command{
 			"total":    total,
 			"query":    query,
 			"tier":     vpkgSearchTier,
+			"registry": vpkgSearchRegistry,
 			"offset":   vpkgSearchOffset,
 			"limit":    vpkgSearchLimit,
 		})
@@ -192,6 +235,62 @@ var vpkgSyncCmd = &cobra.Command{
 			return err
 		}
 		return emitResult(cmd, fmt.Sprintf("Synced %d package(s)", result.Packages), result)
+	},
+}
+
+var vpkgInfoCmd = &cobra.Command{
+	Use:   "info <package-or-source>",
+	Short: "Show package usage info (actions, aliases, and README path)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := resolvePath(vpkgPath)
+		if err != nil {
+			return err
+		}
+		manager := vpkg.NewManager(root)
+		info, err := manager.Info(args[0])
+		if err != nil {
+			return err
+		}
+		if outputMode == "json" {
+			return emitResult(cmd, fmt.Sprintf("Loaded package info for %s", info.Name), info)
+		}
+
+		lines := []string{
+			fmt.Sprintf("Package: %s@%s", info.Name, info.Version),
+			fmt.Sprintf("- tier/kind: %s/%s", info.Tier, info.Kind),
+			fmt.Sprintf("- installed: %t", info.Installed),
+			fmt.Sprintf("- source: %s", info.Source),
+		}
+		if strings.TrimSpace(info.Description) != "" {
+			lines = append(lines, "- description: "+info.Description)
+		}
+		if info.ReadmePath != "" {
+			lines = append(lines, "- readme: "+info.ReadmePath)
+		}
+		if len(info.Capabilities) > 0 {
+			lines = append(lines, "Capabilities:")
+			for _, cap := range info.Capabilities {
+				lines = append(lines, "- "+cap)
+			}
+		}
+		if len(info.Actions) > 0 {
+			lines = append(lines, "Actions:")
+			for _, action := range info.Actions {
+				lines = append(lines, fmt.Sprintf("- %s -> vandor vpkg exec %s %s", action.Name, info.Name, action.Name))
+			}
+		}
+		if len(info.Aliases) > 0 {
+			lines = append(lines, "Aliases:")
+			for _, alias := range info.Aliases {
+				lines = append(lines, fmt.Sprintf("- %s -> vandor %s", alias.Name, alias.Name))
+			}
+		}
+		if !info.Installed {
+			lines = append(lines, "Install:")
+			lines = append(lines, fmt.Sprintf("- vandor vpkg add %s", args[0]))
+		}
+		return emitResult(cmd, strings.Join(lines, "\n"), info)
 	},
 }
 
@@ -377,6 +476,7 @@ func init() {
 	vpkgListCmd.Flags().StringVar(&vpkgPath, "path", ".", "Project root path")
 	vpkgSearchCmd.Flags().StringVar(&vpkgPath, "path", ".", "Project root path")
 	vpkgSearchCmd.Flags().StringVar(&vpkgSearchTier, "tier", "", "Filter by tier: official|verified|community")
+	vpkgSearchCmd.Flags().StringVar(&vpkgSearchRegistry, "registry", "", "Filter by configured registry name")
 	vpkgSearchCmd.Flags().IntVar(&vpkgSearchLimit, "limit", 10, "Limit number of search results (default 10; use 0 for all)")
 	vpkgSearchCmd.Flags().IntVar(&vpkgSearchOffset, "offset", 0, "Skip N search results before showing output")
 	vpkgSyncCmd.Flags().StringVar(&vpkgPath, "path", ".", "Project root path")
@@ -384,12 +484,14 @@ func init() {
 	vpkgDoctorCmd.Flags().BoolVar(&vpkgDoctorFix, "fix", false, "Attempt safe auto-repair by re-syncing installed packages from lock cache")
 	vpkgExecCmd.Flags().StringVar(&vpkgPath, "path", ".", "Project root path")
 	vpkgExecAliasCmd.Flags().StringVar(&vpkgPath, "path", ".", "Project root path")
+	vpkgInfoCmd.Flags().StringVar(&vpkgPath, "path", ".", "Project root path")
 
 	vpkgCmd.AddCommand(vpkgAddCmd)
 	vpkgCmd.AddCommand(vpkgRemoveCmd)
 	vpkgCmd.AddCommand(vpkgListCmd)
 	vpkgCmd.AddCommand(vpkgSearchCmd)
 	vpkgCmd.AddCommand(vpkgSyncCmd)
+	vpkgCmd.AddCommand(vpkgInfoCmd)
 	vpkgCmd.AddCommand(vpkgDoctorCmd)
 	vpkgCmd.AddCommand(vpkgExecCmd)
 	vpkgCmd.AddCommand(vpkgExecAliasCmd)
@@ -435,9 +537,26 @@ func confirmApplyPlan(cmd *cobra.Command) error {
 func renderDoctorIssueLines(report vpkg.DoctorReport) []string {
 	lines := make([]string, 0, len(report.Issues))
 	for _, issue := range report.Issues {
-		lines = append(lines, fmt.Sprintf("- [%s] %s (%s): %s", issue.Severity, issue.Package, issue.Check, issue.Message))
+		lines = append(lines, fmt.Sprintf("- [%s] %s (%s/%s): %s", issue.Severity, issue.Package, issue.Check, issue.Code, issue.Message))
 	}
 	return lines
+}
+
+func printRemovePreview(cmd *cobra.Command, preview vpkg.RemovePreview) {
+	lines := []string{
+		fmt.Sprintf("Force remove preview for %s:", preview.Name),
+		fmt.Sprintf("- owned files: %d", preview.OwnedFiles),
+	}
+	if len(preview.SampleFiles) > 0 {
+		lines = append(lines, "- sample files:")
+		for _, file := range preview.SampleFiles {
+			lines = append(lines, "  - "+file)
+		}
+	}
+	if len(preview.DependentPackages) > 0 {
+		lines = append(lines, "- dependent packages: "+strings.Join(preview.DependentPackages, ", "))
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(lines, "\n"))
 }
 
 func paginateSearchItems(items []vpkg.SearchPackage, offset, limit int) ([]vpkg.SearchPackage, int, error) {

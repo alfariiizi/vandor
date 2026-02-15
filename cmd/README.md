@@ -7,7 +7,7 @@ This package defines Vandor CLI command surface for Phase-1.
 1. `new`
 2. `add context|domain|valueobject|usecase|service` (`valueobject` supports `--kind` and `--enum`)
 3. `sync core|context|all`
-4. `vpkg add|remove|list|search|sync|doctor|exec|exec-alias`
+4. `vpkg add|remove|list|search|sync|info|doctor|exec|exec-alias`
 5. `vpkg registry add|list|remove`
 6. `dev:app|dev:worker`
 7. `run:app|run:worker`
@@ -33,4 +33,7 @@ This package defines Vandor CLI command surface for Phase-1.
 9. `vpkg doctor --fix` re-syncs installed package files from lock cache to repair drift.
 10. `vpkg remove` protects dependency graph by default; use `--force` to bypass.
 11. Root-level alias fallback is enabled for `:` commands (example: `vandor add:http-handler`).
-12. `vpkg search` supports `--limit` (default `10`) and `--offset` pagination flags.
+12. `vpkg search` supports `--registry`, `--limit` (default `10`), and `--offset` pagination flags.
+13. `vpkg doctor` text output includes machine-friendly issue codes.
+14. `vpkg remove --force` prints an impact preview before removal.
+15. `vpkg info <package-or-source>` prints package usage (actions, aliases, install hint, and README path when available).

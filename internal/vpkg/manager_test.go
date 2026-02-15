@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseGitSourceSpec(t *testing.T) {
@@ -127,7 +128,7 @@ func TestSearchFromRegistryIndex(t *testing.T) {
 		t.Fatalf("registry add: %v", err)
 	}
 
-	results, err := m.Search("huma", "")
+	results, err := m.Search("huma", "", "")
 	if err != nil {
 		t.Fatalf("search failed: %v", err)
 	}
@@ -141,9 +142,77 @@ func TestSearchFromRegistryIndex(t *testing.T) {
 
 func TestSearchInvalidTier(t *testing.T) {
 	m := NewManager(t.TempDir())
-	_, err := m.Search("", "enterprise")
+	_, err := m.Search("", "enterprise", "")
 	if err == nil {
 		t.Fatalf("expected invalid tier error")
+	}
+}
+
+func TestSearchRegistryFilter(t *testing.T) {
+	projectRoot := t.TempDir()
+	officialRoot := filepath.Join(t.TempDir(), "official-reg")
+	communityRoot := filepath.Join(t.TempDir(), "community-reg")
+	if err := os.MkdirAll(officialRoot, 0o755); err != nil {
+		t.Fatalf("mkdir official registry: %v", err)
+	}
+	if err := os.MkdirAll(communityRoot, 0o755); err != nil {
+		t.Fatalf("mkdir community registry: %v", err)
+	}
+	officialIndex := `{"packages":[{"name":"official/http-humachi","tier":"official","latest":"0.1.0"}]}`
+	communityIndex := `{"packages":[{"name":"community/http-light","tier":"community","latest":"0.2.0"}]}`
+	if err := os.WriteFile(filepath.Join(officialRoot, "index.json"), []byte(officialIndex), 0o644); err != nil {
+		t.Fatalf("write official index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(communityRoot, "index.json"), []byte(communityIndex), 0o644); err != nil {
+		t.Fatalf("write community index: %v", err)
+	}
+
+	m := NewManager(projectRoot)
+	if _, err := m.RegistryAdd("official", officialRoot); err != nil {
+		t.Fatalf("registry add official: %v", err)
+	}
+	if _, err := m.RegistryAdd("community", communityRoot); err != nil {
+		t.Fatalf("registry add community: %v", err)
+	}
+
+	results, err := m.Search("http", "", "official")
+	if err != nil {
+		t.Fatalf("search with registry filter failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Registry != "official" {
+		t.Fatalf("unexpected filtered search results: %#v", results)
+	}
+}
+
+func TestLoadRegistryIndexRetries(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"temporary"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"packages":[{"name":"official/http-humachi","tier":"official","latest":"0.1.0"}]}`))
+	}))
+	defer server.Close()
+
+	m := NewManager(t.TempDir())
+	m.HTTPTimeout = time.Second
+	m.HTTPRetries = 2
+
+	index, err := m.loadRegistryIndex(RegistryRef{
+		Name: "official",
+		URL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("load registry index should succeed after retry: %v", err)
+	}
+	if len(index.Packages) != 1 {
+		t.Fatalf("unexpected index payload: %#v", index)
+	}
+	if attempts < 2 {
+		t.Fatalf("expected retry attempts, got %d", attempts)
 	}
 }
 
@@ -244,6 +313,9 @@ permissions:
 	}
 	if !hasDoctorIssue(report, "dependency", "missing dependency") {
 		t.Fatalf("expected missing dependency issue, got %+v", report.Issues)
+	}
+	if !hasDoctorIssueCode(report, "DEP_MISSING") {
+		t.Fatalf("expected DEP_MISSING code, got %+v", report.Issues)
 	}
 	if !hasDoctorIssue(report, "action", "run mismatch") {
 		t.Fatalf("expected action run mismatch issue, got %+v", report.Issues)
@@ -392,6 +464,63 @@ permissions:
 	}
 }
 
+func TestInfoInstalledPackage(t *testing.T) {
+	projectRoot := t.TempDir()
+	pkgRoot := filepath.Join(t.TempDir(), "info-package")
+	writeDoctorPackage(t, pkgRoot, `apiVersion: vpkg.v1
+name: official/info-package
+version: 0.1.0
+tier: official
+kind: runtime
+description: package info test
+capabilities:
+  - command:test
+targets:
+  - from: templates/pkg/config.txt
+    to: internal/infrastructure/info_package/config.txt
+    mode: copy
+    conflict: overwrite
+actions:
+  - name: say-info
+    run: echo info
+aliases:
+  - name: add:info-package
+    action: say-info
+permissions:
+  write:
+    - internal/infrastructure/**
+  exec: true
+`)
+	if err := os.WriteFile(filepath.Join(pkgRoot, "README.md"), []byte("# info package"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+
+	m := NewManager(projectRoot)
+	if _, err := m.Add(pkgRoot, AddOptions{}); err != nil {
+		t.Fatalf("add package: %v", err)
+	}
+
+	info, err := m.Info("official/info-package")
+	if err != nil {
+		t.Fatalf("info failed: %v", err)
+	}
+	if !info.Installed {
+		t.Fatalf("expected installed info")
+	}
+	if info.Name != "official/info-package" {
+		t.Fatalf("unexpected info name: %s", info.Name)
+	}
+	if len(info.Actions) != 1 || info.Actions[0].Name != "say-info" {
+		t.Fatalf("unexpected actions: %+v", info.Actions)
+	}
+	if len(info.Aliases) != 1 || info.Aliases[0].Name != "add:info-package" {
+		t.Fatalf("unexpected aliases: %+v", info.Aliases)
+	}
+	if info.ReadmePath == "" {
+		t.Fatalf("expected readme path in info payload")
+	}
+}
+
 func TestDependencyInstalledMatchesAliasVariants(t *testing.T) {
 	lock := Lock{
 		Packages: []LockedPackage{
@@ -522,6 +651,15 @@ func hasDoctorIssue(report DoctorReport, check, contains string) bool {
 			continue
 		}
 		if strings.Contains(issue.Message, contains) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDoctorIssueCode(report DoctorReport, code string) bool {
+	for _, issue := range report.Issues {
+		if issue.Code == code {
 			return true
 		}
 	}

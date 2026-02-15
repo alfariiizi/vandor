@@ -25,6 +25,7 @@ func resetGlobalFlagsForTest() {
 	vpkgAddPlanOnly = false
 	vpkgRemoveForce = false
 	vpkgSearchTier = ""
+	vpkgSearchRegistry = ""
 	vpkgSearchLimit = 10
 	vpkgSearchOffset = 0
 	vpkgDoctorFix = false

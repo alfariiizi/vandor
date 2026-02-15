@@ -40,7 +40,7 @@ version: 2
 # -------------------------------------------------------------------------
 # IMPORTANT: Must match BINARY_NAME in Taskfile.yml
 # Updated by `task init` during scaffold initialization
-project_name: ckeletin-go
+project_name: vandor
 
 # -------------------------------------------------------------------------
 # FRAMEWORK-MANAGED: Build, Archive, Release Configuration
