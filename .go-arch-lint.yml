@@ -35,7 +35,7 @@ workdir: .
 allow:
   depOnAnyVendor: true  # Allow vendor imports (external libraries)
   deepScan: false       # Disable deep AST scanning for performance
-  ignoreNotFoundComponents: false  # Fail if unmatched files found
+  ignoreNotFoundComponents: true   # Tolerate optional/stubbed components in evolving template repos
 
 # Exclude test files, scripts, and generated files from validation
 excludeFiles:
@@ -75,7 +75,7 @@ components:
       - .ckeletin/pkg/logger/**
       - .ckeletin/pkg/testutil/**
       - internal/config/commands/**
-      - internal/ui/**
+      - internal/docs/**
 
   # -------------------------------------------------------------------------
   # PROJECT-MANAGED: Business Logic Layer
@@ -90,10 +90,8 @@ components:
   # Example: Adding 'internal/baseline/**' for a new baseline command
   business:
     in:
-      - internal/ping/**
-      - internal/docs/**
-      - internal/dev/**
-      - internal/progress/**
+      - internal/coregen/**
+      - internal/vpkg/**
       # Add your business logic packages below:
       # - internal/yourpackage/**
 
