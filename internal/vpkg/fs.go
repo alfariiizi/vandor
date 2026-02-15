@@ -41,6 +41,7 @@ func copyFile(src, dst string) error {
 		_ = in.Close()
 	}()
 
+	// #nosec G304 -- destination path is produced by managed install target mapping.
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
@@ -56,6 +57,7 @@ func copyFile(src, dst string) error {
 }
 
 func fileSHA256(path string) (string, error) {
+	// #nosec G304 -- path is provided by controlled ownership/cache traversal.
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

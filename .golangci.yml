@@ -139,6 +139,20 @@ issues:
         - gosec
         - revive        # Command files have standard Cobra patterns
 
+    # Scaffolder writes generated source files and project directories by design.
+    # Keep gosec strict elsewhere, but relax filesystem-permission/path rules here.
+    - path: ^internal/coregen/
+      text: "G30(1|4|6)"
+      linters:
+        - gosec
+
+    # VPKG manager intentionally handles dynamic package targets and lock/state files.
+    # Limit relaxation to filesystem/path findings, keep other security checks active.
+    - path: ^internal/vpkg/
+      text: "G30(1|4|6)"
+      linters:
+        - gosec
+
     # Allow integer conversions - Go's type system is strict, these are often safe
     - text: "G115.*integer overflow conversion"
       linters:

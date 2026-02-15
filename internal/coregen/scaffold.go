@@ -135,6 +135,7 @@ func AddContext(projectRoot, rawContext string, opts AddContextOptions) (string,
 		filepath.Join(contextDir, "application", "usecase"),
 	}
 	for _, dir := range dirs {
+		// #nosec G301 -- generated project source directories are intentionally user-readable.
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
@@ -193,6 +194,7 @@ func AddDomain(projectRoot, rawContext, rawDomain string, withBuilder bool) (str
 	}
 
 	entityDir := filepath.Join(contextDir, "domain", "entity")
+	// #nosec G301 -- generated project source directories are intentionally user-readable.
 	if err := os.MkdirAll(entityDir, 0o755); err != nil {
 		return "", err
 	}
@@ -229,6 +231,7 @@ func AddValueObject(projectRoot, rawContext, rawValueObject, kind string) (strin
 	}
 
 	voDir := filepath.Join(contextDir, "domain", "valueobject")
+	// #nosec G301 -- generated project source directories are intentionally user-readable.
 	if err := os.MkdirAll(voDir, 0o755); err != nil {
 		return "", err
 	}
