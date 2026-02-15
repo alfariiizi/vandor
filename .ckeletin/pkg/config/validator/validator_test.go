@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/peiman/ckeletin-go/.ckeletin/pkg/testutil"
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/testutil"
 )
 
 func TestValidate(t *testing.T) {

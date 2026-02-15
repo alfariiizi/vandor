@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peiman/ckeletin-go/.ckeletin/pkg/testutil"
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/testutil"
 )
 
 func TestValidateConfigFilePermissions(t *testing.T) {

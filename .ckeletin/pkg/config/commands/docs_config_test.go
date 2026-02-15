@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peiman/ckeletin-go/.ckeletin/pkg/config"
+	"github.com/alfariiizi/vandor/.ckeletin/pkg/config"
 )
 
 func TestDocsConfigMetadata(t *testing.T) {
